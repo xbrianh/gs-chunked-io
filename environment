@@ -1,0 +1,8 @@
+# Resolve the location of this file and set DSS_HOME to the root
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ] ; do SOURCE="$(readlink "$SOURCE")"; done
+export GSCIO_HOME="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+
+set -a
+GSCIO_GOOGLE_TEST_BUCKET="gs-chunked-io-test"
+set +a
