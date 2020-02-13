@@ -14,9 +14,9 @@ class Reader(io.IOBase):
             blob.reload()
         self.blob = blob
         self._chunk_size = chunk_size
-        self._part_numbers = list(range(self.number_of_parts()))
 
         self._buffer: bytes = None
+        self._part_numbers: typing.Optional[typing.List[int]] = None
         self._executor: typing.Optional[ThreadPoolExecutor] = None
         self._futures: typing.Optional[list] = None
         self._chunks_to_buffer = chunks_to_buffer
@@ -44,6 +44,7 @@ class Reader(io.IOBase):
 
         if self._buffer is None:
             self._buffer = bytes()
+            self._part_numbers = list(range(self.number_of_parts()))
             self._executor = ThreadPoolExecutor(max_workers=self._chunks_to_buffer)
             self._futures = list()
 
