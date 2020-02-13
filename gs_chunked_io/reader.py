@@ -14,12 +14,15 @@ class Reader(io.IOBase):
             blob.reload()
         self.blob = blob
         self._chunk_size = chunk_size
-        self._part_numbers = list(range(ceil(blob.size / self._chunk_size)))
+        self._part_numbers = list(range(self.number_of_parts()))
 
         self._buffer: bytes = None
         self._executor: typing.Optional[ThreadPoolExecutor] = None
         self._futures: typing.Optional[list] = None
         self._chunks_to_buffer = chunks_to_buffer
+
+    def number_of_parts(self):
+        return ceil(self.blob.size / self._chunk_size)
 
     def fetch_part(self, part_number: int):
         start_chunk = part_number * self._chunk_size
