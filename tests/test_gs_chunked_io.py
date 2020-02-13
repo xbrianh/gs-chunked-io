@@ -21,6 +21,13 @@ class GS:
 def setUpModule():
     if os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
         GS.client = Client.from_service_account_json(os.environ['GOOGLE_APPLICATION_CREDENTIALS'])
+    elif os.environ.get("GSCIO_TEST_CREDENTIALS"):
+        import json
+        import base64
+        from google.oauth2.service_account import Credentials
+        creds_info = json.loads(base64.b64decode(os.environ.get("GSCIO_TEST_CREDENTIALS")))
+        creds = Credentials.from_service_account_info(creds_info)
+        GS.client = Client(credentials=creds)
     else:
         GS.client = Client()
     GS.bucket = GS.client.bucket(os.environ['GSCIO_GOOGLE_TEST_BUCKET'])
