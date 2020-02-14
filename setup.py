@@ -5,7 +5,7 @@ from setuptools import setup, find_packages
 install_requires = [line.rstrip() for line in open(os.path.join(os.path.dirname(__file__), "requirements.txt"))]
 
 setup(name='gs-chunked-io',
-      version='0.1.0',
+      version='0.1.1',
       description='Streaming read/writes to Google Storage blobs with ascynchronous buffering.',
       url='https://github.com/xbrianh/gs-chunked-io.git',
       author='Brian Hannafious',
