@@ -12,7 +12,7 @@ pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))  # noq
 sys.path.insert(0, pkg_root)  # noqa
 
 import gs_chunked_io as gscio
-from gs_chunked_io.writer import _iter_chunks
+from gs_chunked_io.writer import _iter_groups
 
 class GS:
     client = None
@@ -36,7 +36,36 @@ def tearDownModule():
     GS.client._http.close()
 
 class TestGSChunkedIOWriter(unittest.TestCase):
-    def test_chunked_writer_interface(self):
+    def test_writer_base_interface(self):
+        bucket = mock.MagicMock()
+        writer = gscio.WriterBase("fake_key", bucket)
+        with self.assertRaises(OSError):
+            writer.fileno()
+        with self.assertRaises(OSError):
+            writer.read()
+        with self.assertRaises(OSError):
+            writer.readline()
+        with self.assertRaises(OSError):
+            writer.readlines(3)
+        with self.assertRaises(OSError):
+            writer.seek(123)
+        with self.assertRaises(NotImplementedError):
+            writer.tell()
+        with self.assertRaises(NotImplementedError):
+            writer.truncate()
+        with self.assertRaises(NotImplementedError):
+            writer.write(b"asf")
+        with self.assertRaises(NotImplementedError):
+            writer.writelines()
+        self.assertFalse(writer.readable())
+        self.assertFalse(writer.isatty())
+        self.assertFalse(writer.seekable())
+        self.assertFalse(writer.writable())
+        self.assertFalse(writer.closed)
+        writer.close()
+        self.assertTrue(writer.closed)
+
+    def test_writer_interface(self):
         bucket = mock.MagicMock()
         writer = gscio.Writer("fake_key", bucket)
         with self.assertRaises(OSError):
@@ -63,10 +92,10 @@ class TestGSChunkedIOWriter(unittest.TestCase):
         writer.close()
         self.assertTrue(writer.closed)
 
-    def test_iter_chunks(self):
+    def test_iter_groups(self):
         chunk_size = 32
         blob_names = [f"part.{i}" for i in range(65)]
-        chunks = [ch for ch in _iter_chunks(blob_names, chunk_size)]
+        chunks = [ch for ch in _iter_groups(blob_names, chunk_size)]
         for ch in chunks:
             self.assertEqual(ch, blob_names[:32])
             blob_names = blob_names[32:]
@@ -94,7 +123,33 @@ class TestGSChunkedIOWriter(unittest.TestCase):
             self.assertIsNone(GS.bucket.get_blob(fh._part_names[0]))
 
 class TestGSChunkedIOReader(unittest.TestCase):
-    def test_chunked_reader_interface(self):
+    def test_reader_base_interface(self):
+        blob = mock.MagicMock()
+        blob.size = 123
+        reader = gscio.ReaderBase(blob)
+        with self.assertRaises(OSError):
+            reader.fileno()
+        with self.assertRaises(OSError):
+            reader.write(b"asdf")
+        with self.assertRaises(OSError):
+            reader.writelines(b"asdf")
+        with self.assertRaises(OSError):
+            reader.seek(123)
+        with self.assertRaises(NotImplementedError):
+            reader.read(123)
+        with self.assertRaises(NotImplementedError):
+            reader.tell()
+        with self.assertRaises(NotImplementedError):
+            reader.truncate()
+        self.assertFalse(reader.readable())
+        self.assertFalse(reader.isatty())
+        self.assertFalse(reader.seekable())
+        self.assertFalse(reader.writable())
+        self.assertFalse(reader.closed)
+        reader.close()
+        self.assertTrue(reader.closed)
+
+    def test_reader_interface(self):
         blob = mock.MagicMock()
         blob.size = 123
         reader = gscio.Reader(blob)

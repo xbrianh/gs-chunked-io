@@ -1,2 +1,2 @@
-from gs_chunked_io.reader import Reader
-from gs_chunked_io.writer import Writer
+from gs_chunked_io.reader import ReaderBase, Reader
+from gs_chunked_io.writer import WriterBase, Writer
