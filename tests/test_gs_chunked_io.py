@@ -189,7 +189,7 @@ class TestGSChunkedIOReader(unittest.TestCase):
         blob = GS.bucket.get_blob(key)
         chunk_size = len(data) // 3
         with gscio.Reader(blob, chunk_size=chunk_size) as fh:
-            self.assertEqual(4, fh.number_of_parts())
+            self.assertEqual(4, fh.number_of_chunks())
             self.assertEqual(data, fh.read())
 
 if __name__ == '__main__':
