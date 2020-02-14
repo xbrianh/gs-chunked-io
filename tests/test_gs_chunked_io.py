@@ -12,7 +12,7 @@ pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))  # noq
 sys.path.insert(0, pkg_root)  # noqa
 
 import gs_chunked_io as gscio
-from gs_chunked_io.writer import _iter_groups
+from gs_chunked_io.writer import _iter_groups, gs_max_parts_per_compose
 
 class GS:
     client = None
@@ -101,9 +101,18 @@ class TestGSChunkedIOWriter(unittest.TestCase):
             blob_names = blob_names[32:]
 
     def test_write_object(self):
-        key = f"test_write/{uuid4()}"
         data = os.urandom(7 * 1024)
-        with gscio.Writer(key, GS.bucket, chunk_size=len(data) // 3) as fh:
+        with self.subTest("Test chunk_size == len(data)"):
+            self._test_write_object(data, len(data))
+        with self.subTest("Test fewer than gs_max_parts_per_compose parts"):
+            self._test_write_object(data, len(data) // 3)
+        data = os.urandom(120 * 1024)
+        with self.subTest("Test greater than gs_max_parts_per_compose parts"):
+            self._test_write_object(data, len(data) // (1 + gs_max_parts_per_compose))
+
+    def _test_write_object(self, data: bytes, chunk_size: int):
+        key = f"test_write/{uuid4()}"
+        with gscio.Writer(key, GS.bucket, chunk_size=chunk_size) as fh:
             fh.write(data)
         with io.BytesIO() as fh:
             GS.bucket.get_blob(key).download_to_file(fh)

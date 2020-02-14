@@ -68,6 +68,7 @@ class WriterBase(io.IOBase):
         self.bucket.blob(dst_part_name).compose(blobs)
         for blob in blobs:
             blob.delete()
+        return dst_part_name
 
     def _name_for_part_number(self, part_number):
         return "%s.part%06i" % (self.key, part_number)
