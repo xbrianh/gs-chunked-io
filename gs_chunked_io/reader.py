@@ -34,7 +34,7 @@ class ReaderBase(io.IOBase):
         return fh.read()
 
     @classmethod
-    def for_each_chunk(cls, blob: Blob, chunk_size: int):
+    def for_each_chunk(cls, blob: Blob, chunk_size: int=default_chunk_size):
         reader = cls(blob, chunk_size)
         for chunk_number in range(reader.number_of_chunks()):
             yield reader.fetch_chunk(chunk_number)
@@ -93,7 +93,7 @@ class Reader(ReaderBase):
         return ret_data
 
     @classmethod
-    def for_each_chunk(cls, blob: Blob, chunk_size: int, chunks_to_buffer: int=3):
+    def for_each_chunk(cls, blob: Blob, chunk_size: int=default_chunk_size, chunks_to_buffer: int=3):
         reader = cls(blob, chunk_size, chunks_to_buffer)
         reader._fetch_chunks_async(number_of_chunks=reader._chunks_to_buffer)
         for chunk_number in range(reader.number_of_chunks()):
