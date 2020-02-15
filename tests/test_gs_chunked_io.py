@@ -132,6 +132,14 @@ class TestGSChunkedIOWriter(unittest.TestCase):
             self.assertIsNone(GS.bucket.get_blob(fh._part_names[0]))
 
 class TestGSChunkedIOReader(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.key = f"test_read/{uuid4()}"
+        cls.data = os.urandom(1024 * 7)
+        cls.blob = GS.bucket.blob(cls.key)
+        cls.blob.upload_from_file(io.BytesIO(cls.data))
+        cls.blob.reload()
+
     def test_reader_base_interface(self):
         blob = mock.MagicMock()
         blob.size = 123
@@ -183,14 +191,23 @@ class TestGSChunkedIOReader(unittest.TestCase):
         self.assertTrue(reader.closed)
 
     def test_read(self):
-        key = f"test_read/{uuid4()}"
-        data = os.urandom(1024 * 7)
-        GS.bucket.blob(key).upload_from_file(io.BytesIO(data))
-        blob = GS.bucket.get_blob(key)
-        chunk_size = len(data) // 3
-        with gscio.Reader(blob, chunk_size=chunk_size) as fh:
+        chunk_size = len(self.data) // 3
+        with gscio.Reader(self.blob, chunk_size=chunk_size) as fh:
             self.assertEqual(4, fh.number_of_chunks())
-            self.assertEqual(data, fh.read())
+            self.assertEqual(self.data, fh.read())
+
+    def test_for_each_chunk(self):
+        chunk_size = len(self.data) // 3
+        with self.subTest("Test ReaderBase"):
+            data = bytes()
+            for chunk in gscio.ReaderBase.for_each_chunk(self.blob, chunk_size=chunk_size):
+                data += chunk
+            self.assertEqual(data, self.data)
+        with self.subTest("Test Reader"):
+            data = bytes()
+            for chunk in gscio.Reader.for_each_chunk(self.blob, chunk_size=chunk_size):
+                data += chunk
+            self.assertEqual(data, self.data)
 
 if __name__ == '__main__':
     unittest.main()
