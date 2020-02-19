@@ -71,7 +71,7 @@ class AsyncReader(Reader):
     """
     Readable stream on top of GS blob. Bytes are fetched in the background in chunks of `chunk_size`.
     """
-    def __init__(self, blob: Blob, chunk_size: int=default_chunk_size, background_threads: int=3):
+    def __init__(self, blob: Blob, chunk_size: int=default_chunk_size, background_threads: int=1):
         super().__init__(blob, chunk_size)
         assert background_threads >= 1
         self._chunks_to_buffer = background_threads

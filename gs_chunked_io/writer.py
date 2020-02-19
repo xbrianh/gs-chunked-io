@@ -122,7 +122,7 @@ class AsyncWriter(Writer):
     described here: https://cloud.google.com/storage/docs/composite-objects. An attempt is made to clean up
     incomplete or aborted writes.
     """
-    def __init__(self, key: str, bucket: Bucket, chunk_size: int=default_chunk_size, background_threads: int=3):
+    def __init__(self, key: str, bucket: Bucket, chunk_size: int=default_chunk_size, background_threads: int=1):
         super().__init__(key, bucket, chunk_size)
         self._executor = ThreadPoolExecutor(max_workers=background_threads)
         self._futures: typing.Set[Future] = set()
