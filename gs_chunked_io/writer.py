@@ -57,13 +57,13 @@ class Writer(io.IOBase):
                 self.put_part(self._current_part_number, self._buffer)
             self._compose_dest_blob()
 
-    def _compose_dest_blob(self, executor: ThreadPoolExecutor=None):
+    def _compose_dest_blob(self):
         part_names = sorted(self._part_names.copy())
         part_numbers = [len(part_names)]
         while gs_max_parts_per_compose < len(part_names):
             name_groups = [names for names in _iter_groups(part_names, group_size=gs_max_parts_per_compose)]
             new_part_numbers = list(range(part_numbers[-1], part_numbers[-1] + len(name_groups)))
-            with (executor or ThreadPoolExecutor(max_workers=8)) as e:
+            with ThreadPoolExecutor(max_workers=8) as e:
                 futures = [e.submit(self._compose_parts, names, self._name_for_part_number(new_part_number))
                            for names, new_part_number in zip(name_groups, new_part_numbers)]
                 part_names = sorted([f.result() for f in as_completed(futures)])
@@ -153,7 +153,7 @@ class AsyncWriter(Writer):
 
     def _compose_dest_blob(self):
         self.wait()
-        super()._compose_dest_blob(self._executor)
+        super()._compose_dest_blob()
 
     def _delete_orphaned_parts(self):
         for f in self._futures:
