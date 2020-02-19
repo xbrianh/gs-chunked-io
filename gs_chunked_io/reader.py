@@ -11,9 +11,7 @@ from gs_chunked_io.config import default_chunk_size
 
 class Reader(io.IOBase):
     """
-    Fetch chunks of `chunk_size` from `blob` using `ReaderBase.fetch_chunk`.
-
-    `ReaderBase.read()` is not implimented. Use `gs_chunked_io.Reader` instead.
+    Readable stream on top of GS blob. Bytes are fetched in chunks of `chunk_size`.
     """
     def __init__(self, blob: Blob, chunk_size: int=default_chunk_size):
         assert chunk_size >= 1
@@ -71,16 +69,13 @@ class Reader(io.IOBase):
 
 class AsyncReader(Reader):
     """
-    Provide a transparently chunked, buffered, readable stream for `blob`.
-
-    This class uses `ThreadPoolExecutor` to impliment concurrent chunk downloads to
-    `blob`. Up to `chunks_to_buffer` will be read in the background.
+    Readable stream on top of GS blob. Bytes are fetched in the background in chunks of `chunk_size`.
     """
-    def __init__(self, blob: Blob, chunk_size: int=default_chunk_size, chunks_to_buffer: int=3):
+    def __init__(self, blob: Blob, chunk_size: int=default_chunk_size, background_threads: int=3):
         super().__init__(blob, chunk_size)
-        assert chunks_to_buffer >= 1
-        self._chunks_to_buffer = chunks_to_buffer
-        self._executor = ThreadPoolExecutor(max_workers=self._chunks_to_buffer)
+        assert background_threads >= 1
+        self._chunks_to_buffer = background_threads
+        self._executor = ThreadPoolExecutor(max_workers=background_threads)
         self._futures: typing.List[Future] = list()
 
     def readable(self):

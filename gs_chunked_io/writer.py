@@ -9,9 +9,11 @@ from gs_chunked_io.config import default_chunk_size, gs_max_parts_per_compose
 
 class Writer(io.IOBase):
     """
-    Upload chunks to `blob` using `WriterBase.put_part`.
+    Writable stream on top of GS blob.
 
-    `WriterBase.write()` is not implimented. Use `gs_chunked_io.Writer` instead.
+    Chunks of `chunk_size` bytes are uploaded as individual blobs and composed into a multipart object using the API
+    described here: https://cloud.google.com/storage/docs/composite-objects. An attempt is made to clean up
+    incomplete or aborted writes.
     """
     def __init__(self, key: str, bucket: Bucket, chunk_size: int=default_chunk_size):
         self.key = key
@@ -114,12 +116,13 @@ class Writer(io.IOBase):
 
 class AsyncWriter(Writer):
     """
-    Provide a transparently chunked, buffered, write stream on top of `blob`.
+    Writable stream on top of GS blob. Uploads are performed in the background.
 
-    This class uses `ThreadPoolExecutor` to impliment concurrent chunk uploads to `blob`.
-    Up to `background_threads` chunks will be uploaded in the background.
+    Chunks of `chunk_size` bytes are uploaded as individual blobs and composed into a multipart object using the API
+    described here: https://cloud.google.com/storage/docs/composite-objects. An attempt is made to clean up
+    incomplete or aborted writes.
     """
-    def __init__(self, key: str, bucket: Bucket, chunk_size: int=default_chunk_size, background_threads: int=4):
+    def __init__(self, key: str, bucket: Bucket, chunk_size: int=default_chunk_size, background_threads: int=3):
         super().__init__(key, bucket, chunk_size)
         self._executor = ThreadPoolExecutor(max_workers=background_threads)
         self._futures: typing.Set[Future] = set()
