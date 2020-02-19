@@ -7,16 +7,19 @@ from google.cloud.storage.bucket import Bucket
 from gs_chunked_io.config import default_chunk_size, gs_max_parts_per_compose
 
 
-class WriterBase(io.IOBase):
+class Writer(io.IOBase):
     """
     Upload chunks to `blob` using `WriterBase.put_part`.
 
     `WriterBase.write()` is not implimented. Use `gs_chunked_io.Writer` instead.
     """
-    def __init__(self, key: str, bucket: Bucket):
+    def __init__(self, key: str, bucket: Bucket, chunk_size: int=default_chunk_size):
         self.key = key
         self.bucket = bucket
+        self.chunk_size = chunk_size
         self._part_names: typing.List[str] = list()
+        self._buffer = bytes()
+        self._current_part_number = 0
         self._closed = False
 
     @property
@@ -32,10 +35,15 @@ class WriterBase(io.IOBase):
             raise ValueError(f"data for part_number={part_number} must not be empty!")
 
     def writable(self):
-        return False
+        return True
 
     def write(self, data: bytes):
-        raise NotImplementedError()
+        self._buffer += data
+
+        while len(self._buffer) >= self.chunk_size:
+            self.put_part(self._current_part_number, self._buffer[:self.chunk_size])
+            self._buffer = self._buffer[self.chunk_size:]
+            self._current_part_number += 1
 
     def writelines(self, *args, **kwargs):
         raise NotImplementedError()
@@ -43,6 +51,8 @@ class WriterBase(io.IOBase):
     def close(self):
         if not self._closed:
             self._closed = True
+            if self._buffer:
+                self.put_part(self._current_part_number, self._buffer)
             self._compose_dest_blob()
 
     def _compose_dest_blob(self, executor: ThreadPoolExecutor=None):
@@ -102,7 +112,7 @@ class WriterBase(io.IOBase):
         raise NotImplementedError()
 
 
-class Writer(WriterBase):
+class AsyncWriter(Writer):
     """
     Provide a transparently chunked, buffered, write stream on top of `blob`.
 
@@ -110,10 +120,7 @@ class Writer(WriterBase):
     Up to `background_threads` chunks will be uploaded in the background.
     """
     def __init__(self, key: str, bucket: Bucket, chunk_size: int=default_chunk_size, background_threads: int=4):
-        super().__init__(key, bucket)
-        self.chunk_size = chunk_size
-        self._buffer = bytes()
-        self._current_part_number = 0
+        super().__init__(key, bucket, chunk_size)
         self._executor = ThreadPoolExecutor(max_workers=background_threads)
         self._futures: typing.Set[Future] = set()
 
@@ -142,8 +149,6 @@ class Writer(WriterBase):
                 pass
 
     def _compose_dest_blob(self):
-        if self._buffer:
-            self.put_part(self._current_part_number, self._buffer)
         self.wait()
         super()._compose_dest_blob(self._executor)
 

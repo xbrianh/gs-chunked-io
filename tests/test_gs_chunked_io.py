@@ -36,38 +36,11 @@ def tearDownModule():
     GS.client._http.close()
 
 class TestGSChunkedIOWriter(unittest.TestCase):
-    def test_writer_base_interface(self):
-        bucket = mock.MagicMock()
-        writer = gscio.WriterBase("fake_key", bucket)
-        with self.assertRaises(OSError):
-            writer.fileno()
-        with self.assertRaises(OSError):
-            writer.read()
-        with self.assertRaises(OSError):
-            writer.readline()
-        with self.assertRaises(OSError):
-            writer.readlines(3)
-        with self.assertRaises(OSError):
-            writer.seek(123)
-        with self.assertRaises(NotImplementedError):
-            writer.tell()
-        with self.assertRaises(NotImplementedError):
-            writer.truncate()
-        with self.assertRaises(NotImplementedError):
-            writer.write(b"asf")
-        with self.assertRaises(NotImplementedError):
-            writer.writelines()
-        self.assertFalse(writer.readable())
-        self.assertFalse(writer.isatty())
-        self.assertFalse(writer.seekable())
-        self.assertFalse(writer.writable())
-        self.assertFalse(writer.closed)
-        writer.close()
-        self.assertTrue(writer.closed)
+    WriterClass = gscio.Writer
 
     def test_writer_interface(self):
         bucket = mock.MagicMock()
-        writer = gscio.Writer("fake_key", bucket)
+        writer = self.WriterClass("fake_key", bucket)
         with self.assertRaises(OSError):
             writer.fileno()
         with self.assertRaises(OSError):
@@ -112,7 +85,7 @@ class TestGSChunkedIOWriter(unittest.TestCase):
 
     def _test_write_object(self, data: bytes, chunk_size: int):
         key = f"test_write/{uuid4()}"
-        with gscio.Writer(key, GS.bucket, chunk_size=chunk_size) as fh:
+        with self.WriterClass(key, GS.bucket, chunk_size=chunk_size) as fh:
             fh.write(data)
         with io.BytesIO() as fh:
             GS.bucket.get_blob(key).download_to_file(fh)
@@ -123,15 +96,21 @@ class TestGSChunkedIOWriter(unittest.TestCase):
         key = f"test_write/{uuid4()}"
         data = os.urandom(7 * 1024)
         chunk_size = len(data) // 3
-        with gscio.Writer(key, GS.bucket, chunk_size=chunk_size) as fh:
+        with self.WriterClass(key, GS.bucket, chunk_size=chunk_size) as fh:
             fh.write(data[:chunk_size])
-            fh.wait()
+            if hasattr(fh, "wait"):
+                fh.wait()
             self.assertEqual(1, len(fh._part_names))
             self.assertIsNotNone(GS.bucket.get_blob(fh._part_names[0]))
             fh.abort()
             self.assertIsNone(GS.bucket.get_blob(fh._part_names[0]))
 
+class TestGSChunkedIOAsyncWriter(TestGSChunkedIOWriter):
+    WriterClass = gscio.AsyncWriter
+
 class TestGSChunkedIOReader(unittest.TestCase):
+    ReaderClass = gscio.Reader
+
     @classmethod
     def setUpClass(cls):
         cls.key = f"test_read/{uuid4()}"
@@ -140,36 +119,10 @@ class TestGSChunkedIOReader(unittest.TestCase):
         cls.blob.upload_from_file(io.BytesIO(cls.data))
         cls.blob.reload()
 
-    def test_reader_base_interface(self):
-        blob = mock.MagicMock()
-        blob.size = 123
-        reader = gscio.ReaderBase(blob)
-        with self.assertRaises(OSError):
-            reader.fileno()
-        with self.assertRaises(OSError):
-            reader.write(b"asdf")
-        with self.assertRaises(OSError):
-            reader.writelines(b"asdf")
-        with self.assertRaises(OSError):
-            reader.seek(123)
-        with self.assertRaises(NotImplementedError):
-            reader.read(123)
-        with self.assertRaises(NotImplementedError):
-            reader.tell()
-        with self.assertRaises(NotImplementedError):
-            reader.truncate()
-        self.assertFalse(reader.readable())
-        self.assertFalse(reader.isatty())
-        self.assertFalse(reader.seekable())
-        self.assertFalse(reader.writable())
-        self.assertFalse(reader.closed)
-        reader.close()
-        self.assertTrue(reader.closed)
-
     def test_reader_interface(self):
         blob = mock.MagicMock()
         blob.size = 123
-        reader = gscio.Reader(blob)
+        reader = self.ReaderClass(blob)
         with self.assertRaises(OSError):
             reader.fileno()
         with self.assertRaises(OSError):
@@ -192,22 +145,19 @@ class TestGSChunkedIOReader(unittest.TestCase):
 
     def test_read(self):
         chunk_size = len(self.data) // 3
-        with gscio.Reader(self.blob, chunk_size=chunk_size) as fh:
+        with self.ReaderClass(self.blob, chunk_size=chunk_size) as fh:
             self.assertEqual(4, fh.number_of_chunks())
             self.assertEqual(self.data, fh.read())
 
     def test_for_each_chunk(self):
         chunk_size = len(self.data) // 3
-        with self.subTest("Test ReaderBase"):
-            data = bytes()
-            for chunk in gscio.ReaderBase.for_each_chunk(self.blob, chunk_size=chunk_size):
-                data += chunk
-            self.assertEqual(data, self.data)
-        with self.subTest("Test Reader"):
-            data = bytes()
-            for chunk in gscio.Reader.for_each_chunk(self.blob, chunk_size=chunk_size):
-                data += chunk
-            self.assertEqual(data, self.data)
+        data = bytes()
+        for chunk in self.ReaderClass.for_each_chunk(self.blob, chunk_size=chunk_size):
+            data += chunk
+        self.assertEqual(data, self.data)
+
+class TestGSChunkedIOAsyncReader(TestGSChunkedIOReader):
+    ReaderClass = gscio.AsyncReader
 
 if __name__ == '__main__':
     unittest.main()

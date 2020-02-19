@@ -9,7 +9,7 @@ from google.cloud.storage.blob import Blob
 from gs_chunked_io.config import default_chunk_size
 
 
-class ReaderBase(io.IOBase):
+class Reader(io.IOBase):
     """
     Fetch chunks of `chunk_size` from `blob` using `ReaderBase.fetch_chunk`.
 
@@ -21,6 +21,8 @@ class ReaderBase(io.IOBase):
             blob.reload()
         self.blob = blob
         self.chunk_size = chunk_size
+        self._buffer = bytes()
+        self._unfetched_chunks = list(range(self.number_of_chunks()))
 
     def number_of_chunks(self):
         return ceil(self.blob.size / self.chunk_size)
@@ -33,17 +35,26 @@ class ReaderBase(io.IOBase):
         fh.seek(0)
         return fh.read()
 
+    def readable(self):
+        return True
+
+    def read(self, size: int=-1) -> bytes:
+        if -1 == size:
+            size = self.blob.size
+
+        number_of_chunks_to_fetch = ceil((size - len(self._buffer)) / self.chunk_size)
+        for chunk_number in self._unfetched_chunks[:number_of_chunks_to_fetch]:
+            self._buffer += self.fetch_chunk(chunk_number)
+        self._unfetched_chunks = self._unfetched_chunks[number_of_chunks_to_fetch:]
+
+        ret_data, self._buffer = self._buffer[:size], self._buffer[size:]
+        return ret_data
+
     @classmethod
     def for_each_chunk(cls, blob: Blob, chunk_size: int=default_chunk_size):
         reader = cls(blob, chunk_size)
         for chunk_number in range(reader.number_of_chunks()):
             yield reader.fetch_chunk(chunk_number)
-
-    def readable(self):
-        return False
-
-    def read(self, size: int):
-        raise NotImplementedError()
 
     def seek(self, *args, **kwargs):
         raise OSError()
@@ -58,7 +69,7 @@ class ReaderBase(io.IOBase):
         raise OSError()
 
 
-class Reader(ReaderBase):
+class AsyncReader(Reader):
     """
     Provide a transparently chunked, buffered, readable stream for `blob`.
 
@@ -69,8 +80,6 @@ class Reader(ReaderBase):
         super().__init__(blob, chunk_size)
         assert chunks_to_buffer >= 1
         self._chunks_to_buffer = chunks_to_buffer
-        self._buffer = bytes()
-        self._unfetched_chunks = list(range(self.number_of_chunks()))
         self._executor = ThreadPoolExecutor(max_workers=self._chunks_to_buffer)
         self._futures: typing.List[Future] = list()
 
