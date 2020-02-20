@@ -75,11 +75,14 @@ class AsyncReader(Reader):
     """
     Readable stream on top of GS blob. Bytes are fetched in the background in chunks of `chunk_size`.
     """
-    def __init__(self, blob: Blob, chunk_size: int=default_chunk_size, background_threads: int=1):
+    def __init__(self,
+                 blob: Blob,
+                 chunk_size: int=default_chunk_size,
+                 chunks_to_buffer: int=1,
+                 executor: ThreadPoolExecutor=None):
         super().__init__(blob, chunk_size)
-        assert background_threads >= 1
-        self._chunks_to_buffer = background_threads
-        self._executor = ThreadPoolExecutor(max_workers=background_threads)
+        self._chunks_to_buffer = chunks_to_buffer
+        self._executor = executor or ThreadPoolExecutor(max_workers=chunks_to_buffer)
         self._futures: typing.List[Future] = list()
 
     def readable(self):

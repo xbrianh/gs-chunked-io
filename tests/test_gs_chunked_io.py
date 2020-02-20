@@ -5,6 +5,7 @@ import sys
 import unittest
 from uuid import uuid4
 from unittest import mock
+from concurrent.futures import ThreadPoolExecutor
 
 from google.cloud.storage import Client
 
@@ -108,6 +109,18 @@ class TestGSChunkedIOWriter(unittest.TestCase):
 class TestGSChunkedIOAsyncWriter(TestGSChunkedIOWriter):
     WriterClass = gscio.AsyncWriter
 
+    def test_pass_in_executor(self):
+        data = os.urandom(1024)
+        chunk_size = len(data) // 3
+        key = f"test_write/{uuid4()}"
+        with ThreadPoolExecutor() as e:
+            with self.WriterClass(key, GS.bucket, chunk_size=chunk_size, executor=e) as fh:
+                fh.write(data)
+            with io.BytesIO() as fh:
+                GS.bucket.get_blob(key).download_to_file(fh)
+                fh.seek(0)
+                self.assertEqual(data, fh.read())
+
 class TestGSChunkedIOReader(unittest.TestCase):
     ReaderClass = gscio.Reader
 
@@ -174,6 +187,13 @@ class TestGSChunkedIOReader(unittest.TestCase):
 
 class TestGSChunkedIOAsyncReader(TestGSChunkedIOReader):
     ReaderClass = gscio.AsyncReader
+
+    def test_pass_in_executor(self):
+        chunk_size = len(self.data) // 3
+        with ThreadPoolExecutor() as e:
+            with self.ReaderClass(self.blob, chunk_size=chunk_size, executor=e) as fh:
+                self.assertEqual(4, fh.number_of_chunks())
+                self.assertEqual(self.data, fh.read())
 
 if __name__ == '__main__':
     unittest.main()
