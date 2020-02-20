@@ -24,8 +24,8 @@ Writable stream:
 import gs_chunked_io as gscio
 
 bucket = get_my_gs_bucket()
-for chunk in gscio.Writer(my_key, my_bucket) as fh:
-    fh.write(size)
+with gscio.Writer(my_key, my_bucket) as fh:
+    fh.write(data)
 ```
 
 Writable stream, upload in background:
@@ -33,8 +33,8 @@ Writable stream, upload in background:
 import gs_chunked_io as gscio
 
 bucket = get_my_gs_bucket()
-for chunk in gscio.AsyncWriter(my_key, my_bucket) as fh:
-    fh.write(size)
+with gscio.AsyncWriter(my_key, my_bucket) as fh:
+    fh.write(data)
 ```
 
 Process blob in chunks:
@@ -42,8 +42,9 @@ Process blob in chunks:
 import gs_chunked_io as gscio
 
 blob = get_my_gs_blob()
-for chunk in gscio.Reader.for_each_chunk(blob, chunk_size=chunk_size):
-    process_my_chunk(chunk)
+with gscio.Reader(blob) as reader:
+    for chunk in reader.for_each_chunk():
+        process_my_chunk(chunk)
 ```
 
 Multipart copy with processing:
@@ -52,9 +53,10 @@ import gs_chunked_io as gscio
 
 blob = get_my_gs_blob()
 with gscio.Writer(dst_key, dst_bucket) fh_write:
-    for chunk in gscio.AsyncReader.for_each_chunk(blob):
-        process_my_chunk(chunk)
-        fh_write(chunk)
+    with gscio.AsyncReader(blob) as reader:
+        for chunk in reader.for_each_chunk(blob):
+            process_my_chunk(chunk)
+            fh_write(chunk)
 ```
 
 Extract .tar.gz blob on the fly:
