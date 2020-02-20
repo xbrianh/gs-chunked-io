@@ -151,10 +151,26 @@ class TestGSChunkedIOReader(unittest.TestCase):
 
     def test_for_each_chunk(self):
         chunk_size = len(self.data) // 3
-        data = bytes()
-        for chunk in self.ReaderClass.for_each_chunk(self.blob, chunk_size=chunk_size):
-            data += chunk
-        self.assertEqual(data, self.data)
+        with self.subTest("Should work without initial read"):
+            with self.ReaderClass(self.blob, chunk_size=chunk_size) as reader:
+                data = bytes()
+                for chunk in reader.for_each_chunk():
+                    data += chunk
+                self.assertEqual(data, self.data)
+        with self.subTest("Should be able to resume after initial read"):
+            with self.ReaderClass(self.blob, chunk_size=chunk_size) as reader:
+                data = reader.read(reader.chunk_size // 2)
+                for chunk in reader.for_each_chunk():
+                    data += chunk
+                self.assertEqual(data, self.data)
+        with self.subTest("Should be able to finish with trailing read"):
+            with self.ReaderClass(self.blob, chunk_size=chunk_size) as reader:
+                data = bytes()
+                for chunk in reader.for_each_chunk():
+                    data += chunk
+                    break
+                data += reader.read()
+                self.assertEqual(data, self.data)
 
 class TestGSChunkedIOAsyncReader(TestGSChunkedIOReader):
     ReaderClass = gscio.AsyncReader

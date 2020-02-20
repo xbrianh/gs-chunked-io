@@ -48,11 +48,15 @@ class Reader(io.IOBase):
         ret_data, self._buffer = self._buffer[:size], self._buffer[size:]
         return ret_data
 
-    @classmethod
-    def for_each_chunk(cls, blob: Blob, chunk_size: int=default_chunk_size):
-        reader = cls(blob, chunk_size)
-        for chunk_number in range(reader.number_of_chunks()):
-            yield reader.fetch_chunk(chunk_number)
+    def for_each_chunk(self):
+        while self._unfetched_chunks:
+            chunk_number = self._unfetched_chunks.pop(0)
+            self._buffer += self.fetch_chunk(chunk_number)
+            ret_data = self._buffer[:self.chunk_size]
+            self._buffer = self._buffer[self.chunk_size:]
+            yield ret_data
+        if self._buffer:
+            yield self._buffer
 
     def seek(self, *args, **kwargs):
         raise OSError()
@@ -84,32 +88,31 @@ class AsyncReader(Reader):
     def read(self, size: int=-1) -> bytes:
         if -1 == size:
             size = self.blob.size
+        self._fetch_async(size)
+        self._wait_for_buffer_and_remove_complete_futures(size)
+        ret_data = self._buffer[:size]
+        self._buffer = self._buffer[size:]
+        return ret_data
 
+    def for_each_chunk(self):
+        while True:
+            self._fetch_async(self.chunk_size)
+            self._wait_for_buffer_and_remove_complete_futures(expected_buffer_length=self.chunk_size)
+            ret_data = self._buffer[:self.chunk_size]
+            self._buffer = self._buffer[self.chunk_size:]
+            if ret_data:
+                yield ret_data
+            else:
+                break
+
+    def _fetch_async(self, size: int):
         future_buffer_size = len(self._buffer) + self.chunk_size * len(self._futures)
         desired_future_buffer_size = size + self._chunks_to_buffer * self.chunk_size
         if future_buffer_size < desired_future_buffer_size:
             number_of_chunks_to_fetch = ceil((desired_future_buffer_size - future_buffer_size) / self.chunk_size)
-            self._fetch_chunks_async(number_of_chunks_to_fetch)
-
-        self._wait_for_buffer_and_remove_complete_futures(size)
-
-        ret_data, self._buffer = self._buffer[:size], self._buffer[size:]
-        return ret_data
-
-    @classmethod
-    def for_each_chunk(cls, blob: Blob, chunk_size: int=default_chunk_size, chunks_to_buffer: int=3):
-        reader = cls(blob, chunk_size, chunks_to_buffer)
-        reader._fetch_chunks_async(number_of_chunks=reader._chunks_to_buffer)
-        for chunk_number in range(reader.number_of_chunks()):
-            reader._wait_for_buffer_and_remove_complete_futures(expected_buffer_length=chunk_size)
-            ret_data, reader._buffer = reader._buffer[:chunk_size], reader._buffer[chunk_size:]
-            reader._fetch_chunks_async(1)
-            yield ret_data
-
-    def _fetch_chunks_async(self, number_of_chunks: int):
-        self._futures.extend([self._executor.submit(self.fetch_chunk, chunk_number)
-                             for chunk_number in self._unfetched_chunks[:number_of_chunks]])
-        self._unfetched_chunks = self._unfetched_chunks[number_of_chunks:]
+            self._futures.extend([self._executor.submit(self.fetch_chunk, chunk_number)
+                                 for chunk_number in self._unfetched_chunks[:number_of_chunks_to_fetch]])
+            self._unfetched_chunks = self._unfetched_chunks[number_of_chunks_to_fetch:]
 
     def _wait_for_buffer_and_remove_complete_futures(self, expected_buffer_length: int):
         while len(self._buffer) < expected_buffer_length and self._futures:
