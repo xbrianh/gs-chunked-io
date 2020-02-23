@@ -1,73 +1,62 @@
-# gs-chunked-io: Streams for Google Storage blobs
---------------------------------------------------
+# gs-chunked-io: Streams for Google Storage
+_gs-chunked-io_ provides transparently chunked io streams for google storage objects.
+Writable streams are managed as multipart objects that are composed when the stream is closed.
 
-Readable stream:
 ```
 import gs_chunked_io as gscio
+from google.cloud.storage import Client
 
-blob = get_my_gs_blob()
-for chunk in gscio.Reader(blob) as fh:
+client = Client()
+bucket = client.bucket("my-bucket")
+blob = bucket.get_blob("my-key)
+
+# Readable stream:
+with gscio.Reader(blob) as fh:
     fh.read(size)
-```
 
-Readable stream, download in background:
-```
-import gs_chunked_io as gscio
-
-blob = get_my_gs_blob()
-for chunk in gscio.AsyncReader(blob) as fh:
+# Readable stream, download in background:
+with gscio.AsyncReader(blob) as fh:
     fh.read(size)
-```
 
-Writable stream:
-```
-import gs_chunked_io as gscio
-
-bucket = get_my_gs_bucket()
-with gscio.Writer(my_key, my_bucket) as fh:
+# Writable stream:
+with gscio.Writer("my_new_key", bucket) as fh:
     fh.write(data)
-```
 
-Writable stream, upload in background:
-```
-import gs_chunked_io as gscio
-
-bucket = get_my_gs_bucket()
-with gscio.AsyncWriter(my_key, my_bucket) as fh:
+# Writable stream, upload in background:
+with gscio.AsyncWriter("my_new_key", bucket) as fh:
     fh.write(data)
-```
 
-Process blob in chunks:
-```
-import gs_chunked_io as gscio
-
-blob = get_my_gs_blob()
+# Process blob in chunks:
 with gscio.Reader(blob) as reader:
     for chunk in reader.for_each_chunk():
-        process_my_chunk(chunk)
-```
+        my_chunk_processor(chunk)
 
-Multipart copy with processing:
-```
-import gs_chunked_io as gscio
-
-blob = get_my_gs_blob()
-with gscio.Writer(dst_key, dst_bucket) fh_write:
+# Multipart copy with processing:
+dst_bucket = client.bucket("my_dest_bucket")
+with gscio.Writer("my_dest_key", dst_bucket) fh_write:
     with gscio.AsyncReader(blob) as reader:
         for chunk in reader.for_each_chunk(blob):
             process_my_chunk(chunk)
             fh_write(chunk)
-```
 
-Extract .tar.gz blob on the fly:
-```
+# Extract .tar.gz on the fly:
 import gzip
 import tarfile
-import gs_chunked_io as gscio
-
-with gscio.AsyncReader(my_blob) as fh:
+with gscio.AsyncReader(blob) as fh:
     gzip_reader = gzip.GzipFile(fileobj=fh)
     tf = tarfile.TarFile(fileobj=gzip_reader)
     for tarinfo in tf:
         process_my_tarinfo(tarinfo)
 ```
+
+## Installation
+```
+pip install gs-chunked-io
+```
+
+## Links
+Project home page [GitHub](https://github.com/xbrianh/gs-chunked-io)  
+Package distribution [PyPI](https://pypi.org/project/gs-chunked-io/)
+
+### Bugs
+Please report bugs, issues, feature requests, etc. on [GitHub](https://github.com/xbrianh/gs-chunked-io).
