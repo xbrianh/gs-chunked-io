@@ -60,3 +60,5 @@ Package distribution [PyPI](https://pypi.org/project/gs-chunked-io/)
 
 ### Bugs
 Please report bugs, issues, feature requests, etc. on [GitHub](https://github.com/xbrianh/gs-chunked-io).
+
+![](https://travis-ci.org/xbrianh/gs-chunked-io.svg?branch=master) ![](https://badge.fury.io/py/gs-chunked-io.svg)
