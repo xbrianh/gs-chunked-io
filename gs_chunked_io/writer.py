@@ -79,7 +79,11 @@ class Writer(io.IOBase):
             blobs.append(blob)
         self.bucket.blob(dst_part_name).compose(blobs)
         for blob in blobs:
-            blob.delete()
+            try:
+                blob.delete()
+            except Exception:
+                # TODO: Catch specific exceptions - xbrianh
+                pass
         return dst_part_name
 
     def _name_for_part_number(self, part_number):
