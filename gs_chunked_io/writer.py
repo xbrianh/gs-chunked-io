@@ -20,7 +20,7 @@ class Writer(io.IOBase):
         self.bucket = bucket
         self.chunk_size = chunk_size
         self._part_names: typing.List[str] = list()
-        self._buffer = bytes()
+        self._buffer = bytearray()
         self._current_part_number = 0
         self._closed = False
 
@@ -44,7 +44,7 @@ class Writer(io.IOBase):
 
         while len(self._buffer) >= self.chunk_size:
             self.put_part(self._current_part_number, self._buffer[:self.chunk_size])
-            self._buffer = self._buffer[self.chunk_size:]
+            del self._buffer[:self.chunk_size]
             self._current_part_number += 1
 
     def writelines(self, *args, **kwargs):
@@ -140,7 +140,7 @@ class AsyncWriter(Writer):
         while len(self._buffer) >= self.chunk_size:
             f = self._executor.submit(self.put_part, self._current_part_number, self._buffer[:self.chunk_size])
             self._futures.add(f)
-            self._buffer = self._buffer[self.chunk_size:]
+            del self._buffer[:self.chunk_size]
             self._current_part_number += 1
 
         for f in self._futures.copy():

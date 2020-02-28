@@ -19,7 +19,7 @@ class Reader(io.IOBase):
             blob.reload()
         self.blob = blob
         self.chunk_size = chunk_size
-        self._buffer = bytes()
+        self._buffer = bytearray()
         self._unfetched_chunks = list(range(self.number_of_chunks()))
 
     def number_of_chunks(self):
@@ -28,10 +28,7 @@ class Reader(io.IOBase):
     def fetch_chunk(self, chunk_number: int):
         start_chunk = chunk_number * self.chunk_size
         end_chunk = start_chunk + self.chunk_size - 1
-        fh = io.BytesIO()
-        self.blob.download_to_file(fh, start=start_chunk, end=end_chunk)
-        fh.seek(0)
-        return fh.read()
+        return self.blob.download_as_string(start=start_chunk, end=end_chunk)
 
     def readable(self):
         return True
@@ -45,7 +42,8 @@ class Reader(io.IOBase):
             self._buffer += self.fetch_chunk(chunk_number)
         self._unfetched_chunks = self._unfetched_chunks[number_of_chunks_to_fetch:]
 
-        ret_data, self._buffer = self._buffer[:size], self._buffer[size:]
+        ret_data = self._buffer[:size]
+        del self._buffer[:size]
         return ret_data
 
     def for_each_chunk(self):
@@ -53,7 +51,7 @@ class Reader(io.IOBase):
             chunk_number = self._unfetched_chunks.pop(0)
             self._buffer += self.fetch_chunk(chunk_number)
             ret_data = self._buffer[:self.chunk_size]
-            self._buffer = self._buffer[self.chunk_size:]
+            del self._buffer[:self.chunk_size]
             yield ret_data
         if self._buffer:
             yield self._buffer
@@ -94,7 +92,7 @@ class AsyncReader(Reader):
         self._fetch_async(size)
         self._wait_for_buffer_and_remove_complete_futures(size)
         ret_data = self._buffer[:size]
-        self._buffer = self._buffer[size:]
+        del self._buffer[:size]
         return ret_data
 
     def for_each_chunk(self):
@@ -102,7 +100,7 @@ class AsyncReader(Reader):
             self._fetch_async(self.chunk_size)
             self._wait_for_buffer_and_remove_complete_futures(expected_buffer_length=self.chunk_size)
             ret_data = self._buffer[:self.chunk_size]
-            self._buffer = self._buffer[self.chunk_size:]
+            del self._buffer[:self.chunk_size]
             if ret_data:
                 yield ret_data
             else:
