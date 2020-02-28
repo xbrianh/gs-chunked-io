@@ -8,7 +8,7 @@ with open("README.md") as fh:
     long_description = fh.read()
 
 setup(name='gs-chunked-io',
-      version='0.2.4',
+      version='0.2.5',
       description='Streaming read/writes to Google Storage blobs with ascynchronous buffering.',
       long_description=long_description,
       long_description_content_type='text/markdown',
