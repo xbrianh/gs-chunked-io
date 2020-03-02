@@ -99,8 +99,8 @@ class TestGSChunkedIOWriter(unittest.TestCase):
         chunk_size = len(data) // 3
         with self.WriterClass(key, GS.bucket, chunk_size=chunk_size) as fh:
             fh.write(data[:chunk_size])
-            if hasattr(fh, "wait"):
-                fh.wait()
+            if hasattr(fh, "_wait"):
+                fh._wait()
             self.assertEqual(1, len(fh._part_names))
             self.assertIsNotNone(GS.bucket.get_blob(fh._part_names[0]))
             fh.abort()
