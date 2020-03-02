@@ -76,7 +76,7 @@ class AsyncReader(Reader):
     def __init__(self,
                  blob: Blob,
                  chunk_size: int=default_chunk_size,
-                 chunks_to_buffer: int=1,
+                 chunks_to_buffer: int=2,
                  executor: ThreadPoolExecutor=None):
         super().__init__(blob, chunk_size)
         self._chunks_to_buffer = chunks_to_buffer
