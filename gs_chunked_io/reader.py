@@ -46,6 +46,12 @@ class Reader(io.IOBase):
         del self._buffer[:size]
         return ret_data
 
+    def readinto(self, buff) -> int:
+        d = self.read(len(buff))
+        bytes_read = len(d)
+        buff[:bytes_read] = d
+        return bytes_read
+
     def for_each_chunk(self):
         while self._unfetched_chunks:
             chunk_number = self._unfetched_chunks.pop(0)

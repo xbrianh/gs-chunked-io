@@ -162,6 +162,13 @@ class TestGSChunkedIOReader(unittest.TestCase):
             self.assertEqual(4, fh.number_of_chunks())
             self.assertEqual(self.data, fh.read())
 
+    def test_readinto(self):
+        chunk_size = len(self.data) // 3
+        buff = bytearray(2 * len(self.data))
+        with self.ReaderClass(self.blob, chunk_size=chunk_size) as fh:
+            bytes_read = fh.readinto(buff)
+            self.assertEqual(self.data, buff[:bytes_read])
+
     def test_for_each_chunk(self):
         chunk_size = len(self.data) // 3
         with self.subTest("Should work without initial read"):
