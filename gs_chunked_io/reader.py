@@ -42,7 +42,7 @@ class Reader(io.IOBase):
             self._buffer += self.fetch_chunk(chunk_number)
         self._unfetched_chunks = self._unfetched_chunks[number_of_chunks_to_fetch:]
 
-        ret_data = self._buffer[:size]
+        ret_data = bytes(memoryview(self._buffer)[:size])
         del self._buffer[:size]
         return ret_data
 
@@ -97,7 +97,7 @@ class AsyncReader(Reader):
             size = self.blob.size
         self._fetch_async(size)
         self._wait_for_buffer_and_remove_complete_futures(size)
-        ret_data = self._buffer[:size]
+        ret_data = bytes(memoryview(self._buffer)[:size])
         del self._buffer[:size]
         return ret_data
 
