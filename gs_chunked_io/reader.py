@@ -20,6 +20,7 @@ class Reader(io.IOBase):
         self.blob = blob
         self.chunk_size = chunk_size
         self._buffer = bytearray()
+        self._pos = 0
         self._unfetched_chunks = list(range(self.number_of_chunks()))
 
     def number_of_chunks(self):
@@ -37,13 +38,16 @@ class Reader(io.IOBase):
         if -1 == size:
             size = self.blob.size
 
-        number_of_chunks_to_fetch = ceil((size - len(self._buffer)) / self.chunk_size)
-        for chunk_number in self._unfetched_chunks[:number_of_chunks_to_fetch]:
-            self._buffer += self.fetch_chunk(chunk_number)
-        self._unfetched_chunks = self._unfetched_chunks[number_of_chunks_to_fetch:]
+        if size + self._pos > len(self._buffer):
+            del self._buffer[:self._pos]
+            number_of_chunks_to_fetch = ceil((size - len(self._buffer)) / self.chunk_size)
+            for chunk_number in self._unfetched_chunks[:number_of_chunks_to_fetch]:
+                self._buffer += self.fetch_chunk(chunk_number)
+            self._unfetched_chunks = self._unfetched_chunks[number_of_chunks_to_fetch:]
+            self._pos = 0
 
-        ret_data = bytes(memoryview(self._buffer)[:size])
-        del self._buffer[:size]
+        ret_data = bytes(memoryview(self._buffer)[self._pos:self._pos + size])
+        self._pos += len(ret_data)
         return ret_data
 
     def readinto(self, buff) -> int:
@@ -53,6 +57,9 @@ class Reader(io.IOBase):
         return bytes_read
 
     def for_each_chunk(self):
+        if self._pos:
+            del self._buffer[:self._pos]
+            self._pos = 0
         while self._unfetched_chunks:
             chunk_number = self._unfetched_chunks.pop(0)
             self._buffer += self.fetch_chunk(chunk_number)
@@ -97,11 +104,14 @@ class AsyncReader(Reader):
             size = self.blob.size
         self._fetch_async(size)
         self._wait_for_buffer_and_remove_complete_futures(size)
-        ret_data = bytes(memoryview(self._buffer)[:size])
-        del self._buffer[:size]
+        ret_data = bytes(memoryview(self._buffer)[self._pos:self._pos + size])
+        self._pos += len(ret_data)
         return ret_data
 
     def for_each_chunk(self):
+        if self._pos:
+            del self._buffer[:self._pos]
+            self._pos = 0
         while True:
             self._fetch_async(self.chunk_size)
             self._wait_for_buffer_and_remove_complete_futures(expected_buffer_length=self.chunk_size)
@@ -113,13 +123,15 @@ class AsyncReader(Reader):
                 break
 
     def _fetch_async(self, size: int):
-        future_buffer_size = len(self._buffer) + self.chunk_size * len(self._futures)
+        future_buffer_size = len(self._buffer) - self._pos + self.chunk_size * len(self._futures)
         desired_future_buffer_size = size + self._chunks_to_buffer * self.chunk_size
         if future_buffer_size < desired_future_buffer_size:
+            del self._buffer[:self._pos]
             number_of_chunks_to_fetch = ceil((desired_future_buffer_size - future_buffer_size) / self.chunk_size)
             self._futures.extend([self._executor.submit(self.fetch_chunk, chunk_number)
                                  for chunk_number in self._unfetched_chunks[:number_of_chunks_to_fetch]])
             self._unfetched_chunks = self._unfetched_chunks[number_of_chunks_to_fetch:]
+            self._pos = 0
 
     def _wait_for_buffer_and_remove_complete_futures(self, expected_buffer_length: int):
         while len(self._buffer) < expected_buffer_length and self._futures:
