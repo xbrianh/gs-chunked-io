@@ -97,7 +97,7 @@ class Writer(io.IOBase):
         See: https://cloud.google.com/blog/products/gcp/optimizing-your-cloud-storage-performance-google-cloud-performance-atlas  # noqa
         """
         part_id = uuid.uuid4()
-        return f"{part_id}.{self._upload_id}.%06i" % part_number
+        return f"{part_id}.{self._upload_id}.gs-chunked-io-part.%06i" % part_number
 
     def _sorted_part_names(self, part_names):
         """
