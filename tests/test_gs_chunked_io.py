@@ -15,6 +15,7 @@ sys.path.insert(0, pkg_root)  # noqa
 import gs_chunked_io as gscio
 from gs_chunked_io.writer import _iter_groups, gs_max_parts_per_compose
 
+
 class GS:
     client = None
     bucket = None
@@ -83,10 +84,15 @@ class TestGSChunkedIOWriter(unittest.TestCase):
         data = os.urandom(120 * 1024)
         with self.subTest("Test greater than gs_max_parts_per_compose parts"):
             self._test_write_object(data, len(data) // (1 + gs_max_parts_per_compose))
+        with self.subTest("Shouldn't be able to pass in a string for bucket"):
+            with self.assertRaises(AttributeError):
+                self._test_write_object(data, len(data) // 3, "not-a-bucket")
+            
 
-    def _test_write_object(self, data: bytes, chunk_size: int):
+    def _test_write_object(self, data: bytes, chunk_size: int, bucket=None):
+        bucket = bucket or GS.bucket
         key = f"test_write/{uuid4()}"
-        with self.WriterClass(key, GS.bucket, chunk_size=chunk_size) as fh:
+        with self.WriterClass(key, bucket, chunk_size=chunk_size) as fh:
             fh.write(data)
         with io.BytesIO() as fh:
             GS.bucket.get_blob(key).download_to_file(fh)

@@ -81,8 +81,8 @@ class Writer(io.IOBase):
 
         with ThreadPoolExecutor(max_workers=8) as e:
             futures = [e.submit(_del, name) for name in part_names]
-            for _ in as_completed(futures):
-                pass
+            for f in as_completed(futures):
+                f.result()  # raises if future errored
 
     def _compose_parts(self, part_names, dst_part_name):
         blobs = [self.bucket.blob(name) for name in part_names]
@@ -163,6 +163,7 @@ class AsyncWriter(Writer):
 
         for f in self._futures.copy():
             if f.done():
+                f.result()  # raises if future errored
                 self._futures.remove(f)
 
     def _wait(self):
@@ -171,7 +172,7 @@ class AsyncWriter(Writer):
         """
         if self._futures:
             for f in as_completed(self._futures):
-                pass
+                f.result()  # raises if future errored
 
     def _compose_dest_blob(self):
         self._wait()
