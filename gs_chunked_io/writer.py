@@ -3,7 +3,7 @@ import typing
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 
-from google.cloud.storage.bucket import Bucket
+import google.cloud.storage.bucket
 
 from gs_chunked_io.config import default_chunk_size, gs_max_parts_per_compose
 
@@ -16,7 +16,14 @@ class Writer(io.IOBase):
     described here: https://cloud.google.com/storage/docs/composite-objects. An attempt is made to clean up
     incomplete or aborted writes.
     """
-    def __init__(self, key: str, bucket: Bucket, chunk_size: int=default_chunk_size):
+    def __init__(self,
+                 key: str,
+                 bucket: google.cloud.storage.bucket.Bucket,
+                 chunk_size: int=default_chunk_size):
+        try:
+            bucket.blob
+        except AttributeError:
+            raise TypeError("Expected instance of google.cloud.storage.bucket.Bucket, or similar.")
         self.key = key
         self.bucket = bucket
         self.chunk_size = chunk_size
@@ -141,7 +148,7 @@ class AsyncWriter(Writer):
     """
     def __init__(self,
                  key: str,
-                 bucket: Bucket,
+                 bucket: google.cloud.storage.bucket.Bucket,
                  chunk_size: int=default_chunk_size,
                  concurrent_uploads: int=4,
                  executor: ThreadPoolExecutor=None):

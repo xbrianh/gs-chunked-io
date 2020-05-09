@@ -85,7 +85,7 @@ class TestGSChunkedIOWriter(unittest.TestCase):
         with self.subTest("Test greater than gs_max_parts_per_compose parts"):
             self._test_write_object(data, len(data) // (1 + gs_max_parts_per_compose))
         with self.subTest("Shouldn't be able to pass in a string for bucket"):
-            with self.assertRaises(AttributeError):
+            with self.assertRaises(TypeError):
                 self._test_write_object(data, len(data) // 3, "not-a-bucket")
             
 
