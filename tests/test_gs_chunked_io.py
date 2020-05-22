@@ -165,7 +165,7 @@ class TestGSChunkedIOReader(unittest.TestCase):
     def test_read(self):
         chunk_size = len(self.data) // 3
         with self.ReaderClass(self.blob, chunk_size=chunk_size) as fh:
-            self.assertEqual(4, fh.number_of_chunks())
+            self.assertEqual(4, fh.number_of_chunks)
             self.assertEqual(self.data, fh.read())
 
     def test_readinto(self):
@@ -205,7 +205,7 @@ class TestGSChunkedIOAsyncReader(TestGSChunkedIOReader):
         chunk_size = len(self.data) // 3
         with ThreadPoolExecutor() as e:
             with self.ReaderClass(self.blob, chunk_size=chunk_size, executor=e) as fh:
-                self.assertEqual(4, fh.number_of_chunks())
+                self.assertEqual(4, fh.number_of_chunks)
                 self.assertEqual(self.data, fh.read())
 
 if __name__ == '__main__':

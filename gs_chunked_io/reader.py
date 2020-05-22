@@ -2,6 +2,7 @@ import io
 import typing
 from math import ceil
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from itertools import islice
 
 from google.cloud.storage import Client
 from google.cloud.storage.blob import Blob
@@ -21,10 +22,8 @@ class Reader(io.IOBase):
         self.chunk_size = chunk_size
         self._buffer = bytearray()
         self._pos = 0
-        self._unfetched_chunks = list(range(self.number_of_chunks()))
-
-    def number_of_chunks(self):
-        return ceil(self.blob.size / self.chunk_size)
+        self.number_of_chunks = ceil(self.blob.size / self.chunk_size)
+        self._unfetched_chunks = (i for i in range(self.number_of_chunks))
 
     def fetch_chunk(self, chunk_number: int):
         start_chunk = chunk_number * self.chunk_size
@@ -41,9 +40,8 @@ class Reader(io.IOBase):
         if size + self._pos > len(self._buffer):
             del self._buffer[:self._pos]
             number_of_chunks_to_fetch = ceil((size - len(self._buffer)) / self.chunk_size)
-            for chunk_number in self._unfetched_chunks[:number_of_chunks_to_fetch]:
+            for chunk_number in islice(self._unfetched_chunks, number_of_chunks_to_fetch):
                 self._buffer += self.fetch_chunk(chunk_number)
-            self._unfetched_chunks = self._unfetched_chunks[number_of_chunks_to_fetch:]
             self._pos = 0
 
         ret_data = bytes(memoryview(self._buffer)[self._pos:self._pos + size])
@@ -60,8 +58,7 @@ class Reader(io.IOBase):
         if self._pos:
             del self._buffer[:self._pos]
             self._pos = 0
-        while self._unfetched_chunks:
-            chunk_number = self._unfetched_chunks.pop(0)
+        for chunk_number in self._unfetched_chunks:
             self._buffer += self.fetch_chunk(chunk_number)
             ret_data = self._buffer[:self.chunk_size]
             del self._buffer[:self.chunk_size]
@@ -129,8 +126,7 @@ class AsyncReader(Reader):
             del self._buffer[:self._pos]
             number_of_chunks_to_fetch = ceil((desired_future_buffer_size - future_buffer_size) / self.chunk_size)
             self._futures.extend([self._executor.submit(self.fetch_chunk, chunk_number)
-                                 for chunk_number in self._unfetched_chunks[:number_of_chunks_to_fetch]])
-            self._unfetched_chunks = self._unfetched_chunks[number_of_chunks_to_fetch:]
+                                 for chunk_number in islice(self._unfetched_chunks, number_of_chunks_to_fetch)])
             self._pos = 0
 
     def _wait_for_buffer_and_remove_complete_futures(self, expected_buffer_length: int):
