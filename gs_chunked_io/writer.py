@@ -20,10 +20,6 @@ class Writer(io.IOBase):
                  key: str,
                  bucket: google.cloud.storage.bucket.Bucket,
                  chunk_size: int=default_chunk_size):
-        try:
-            bucket.blob
-        except AttributeError:
-            raise TypeError("Expected instance of google.cloud.storage.bucket.Bucket, or similar.")
         self.key = key
         self.bucket = bucket
         self.chunk_size = chunk_size
@@ -32,6 +28,10 @@ class Writer(io.IOBase):
         self._current_part_number = 0
         self._closed = False
         self._upload_id = uuid.uuid4()
+        try:
+            bucket.blob
+        except AttributeError:
+            raise TypeError("Expected instance of google.cloud.storage.bucket.Bucket, or similar.")
 
     @property
     def closed(self):
