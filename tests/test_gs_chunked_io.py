@@ -104,6 +104,22 @@ class TestGSChunkedIOWriter(unittest.TestCase):
             fh.seek(0)
             self.assertEqual(data, fh.read())
 
+    def test_part_callback(self):
+        chunk_size = 7
+        number_of_parts = 5
+        parts_called = list()
+        data = os.urandom(number_of_parts * chunk_size)
+
+        def cb(part_number, part_name, chunk_data):
+            self.assertEqual(chunk_data, data[part_number * chunk_size : (1 + part_number) * chunk_size])
+            parts_called.append(part_number)
+
+        key = f"test_write/{uuid4()}"
+        with self.WriterClass(key, GS.bucket, chunk_size=chunk_size, part_callback=cb) as fh:
+            fh.write(data)
+
+        self.assertEqual(number_of_parts, len(parts_called))
+
     def test_abort(self):
         key = f"test_write/{uuid4()}"
         data = os.urandom(7 * 1024)

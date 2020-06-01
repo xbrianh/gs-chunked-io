@@ -15,14 +15,19 @@ class Writer(io.IOBase):
     Chunks of `chunk_size` bytes are uploaded as individual blobs and composed into a multipart object using the API
     described here: https://cloud.google.com/storage/docs/composite-objects. An attempt is made to clean up
     incomplete or aborted writes.
+
+    if the `part_callback` argument is provided during construction, it will be called for each part as uploaded, with
+    part number, part blob key, and part data as arguments.
     """
     def __init__(self,
                  key: str,
                  bucket: google.cloud.storage.bucket.Bucket,
-                 chunk_size: int=default_chunk_size):
+                 chunk_size: int=default_chunk_size,
+                 part_callback: typing.Callable=None):
         self.key = key
         self.bucket = bucket
         self.chunk_size = chunk_size
+        self._part_callback = part_callback
         self._part_names: typing.List[str] = list()
         self._buffer = bytearray()
         self._current_part_number = 0
@@ -42,6 +47,8 @@ class Writer(io.IOBase):
             part_name = self._name_for_part_number(part_number)
             self.bucket.blob(part_name).upload_from_file(io.BytesIO(data))
             self._part_names.append(part_name)
+            if self._part_callback:
+                self._part_callback(part_number, part_name, data)
         else:
             raise ValueError(f"data for part_number={part_number} must not be empty!")
 
@@ -150,9 +157,10 @@ class AsyncWriter(Writer):
                  key: str,
                  bucket: google.cloud.storage.bucket.Bucket,
                  chunk_size: int=default_chunk_size,
+                 part_callback: typing.Callable=None,
                  concurrent_uploads: int=4,
                  executor: ThreadPoolExecutor=None):
-        super().__init__(key, bucket, chunk_size)
+        super().__init__(key, bucket, chunk_size, part_callback=part_callback)
         self._executor = executor or ThreadPoolExecutor(max_workers=concurrent_uploads)
         self._futures: typing.Set[Future] = set()
 
