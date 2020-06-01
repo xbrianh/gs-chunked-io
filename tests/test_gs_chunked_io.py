@@ -2,6 +2,7 @@
 import io
 import os
 import sys
+import warnings
 import unittest
 from uuid import uuid4
 from unittest import mock
@@ -21,6 +22,7 @@ class GS:
     bucket = None
 
 def setUpModule():
+    _suppress_warnings()
     if os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
         GS.client = Client.from_service_account_json(os.environ['GOOGLE_APPLICATION_CREDENTIALS'])
     elif os.environ.get("GSCIO_TEST_CREDENTIALS"):
@@ -39,6 +41,9 @@ def tearDownModule():
 
 class TestGSChunkedIOWriter(unittest.TestCase):
     WriterClass = gscio.Writer
+
+    def setUp(self):
+        _suppress_warnings()
 
     def test_writer_interface(self):
         bucket = mock.MagicMock()
@@ -130,6 +135,9 @@ class TestGSChunkedIOAsyncWriter(TestGSChunkedIOWriter):
 class TestGSChunkedIOReader(unittest.TestCase):
     ReaderClass = gscio.Reader
 
+    def setUp(self):
+        _suppress_warnings()
+
     @classmethod
     def setUpClass(cls):
         cls.key = f"test_read/{uuid4()}"
@@ -207,6 +215,13 @@ class TestGSChunkedIOAsyncReader(TestGSChunkedIOReader):
             with self.ReaderClass(self.blob, chunk_size=chunk_size, executor=e) as fh:
                 self.assertEqual(4, fh.number_of_chunks)
                 self.assertEqual(self.data, fh.read())
+
+
+def _suppress_warnings():
+    # Suppress the annoying google gcloud _CLOUD_SDK_CREDENTIALS_WARNING warnings
+    warnings.filterwarnings("ignore", "Your application has authenticated using end user credentials")
+    # Suppress unclosed socket warnings
+    warnings.simplefilter("ignore", ResourceWarning)
 
 if __name__ == '__main__':
     unittest.main()
