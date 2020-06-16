@@ -23,7 +23,6 @@ clean:
 	git clean -dfx
 
 build: clean version
-	-rm -rf dist
 	python setup.py bdist_wheel
 
 install: build
