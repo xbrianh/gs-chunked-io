@@ -1,5 +1,6 @@
 import os
 import glob
+import subprocess
 from setuptools import setup, find_packages
 
 install_requires = [line.rstrip() for line in open(os.path.join(os.path.dirname(__file__), "requirements.txt"))]
@@ -7,9 +8,17 @@ install_requires = [line.rstrip() for line in open(os.path.join(os.path.dirname(
 with open("README.md") as fh:
     long_description = fh.read()
 
+def get_version():
+    p = subprocess.run(["git", "describe", "--tags", "--match", "v*.*.*"], stdout=subprocess.PIPE)
+    out = p.stdout.decode("ascii").strip()
+    if "-" in out:
+        out = out.split("-", 1)[0]
+    assert out.startswith("v")
+    return out[1:]
+
 setup(
     name='gs-chunked-io',
-    version='0.2.11',
+    version=get_version(),
     description='Streaming read/writes to Google Storage blobs with ascynchronous buffering.',
     long_description=long_description,
     long_description_content_type='text/markdown',

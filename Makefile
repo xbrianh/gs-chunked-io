@@ -22,11 +22,11 @@ gs_chunked_io/version.py: setup.py
 clean:
 	git clean -dfx
 
-build: version clean
+build: clean version
 	-rm -rf dist
 	python setup.py bdist_wheel
 
 install: build
 	pip install --upgrade dist/*.whl
 
-.PHONY: test lint mypy tests clean build install
+.PHONY: test lint mypy tests gs_chunked_io/version.py clean build install
