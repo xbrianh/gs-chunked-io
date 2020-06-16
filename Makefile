@@ -20,8 +20,7 @@ gs_chunked_io/version.py: setup.py
 	echo "__version__ = '$$(python setup.py --version)'" > $@
 
 clean:
-	-rm -rf build dist
-	-rm -rf *.egg-info
+	git clean -dfx
 
 build: version clean
 	-rm -rf dist
