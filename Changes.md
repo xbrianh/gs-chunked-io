@@ -1,0 +1,10 @@
+# Changes for v0.2.12 (2020-06-16)
+Fix versioning (#33)
+Enable changelog (#34)
+Use git during make clean (#32)
+Fix setup.py formatting (#31)
+Add part callback for writer (#30)
+Suppress GCP and socket warnings in tests (#29)
+Use generator to track reader parts (#27)
+Avoid exceptions during failed Writer instantiation (#28)
+
