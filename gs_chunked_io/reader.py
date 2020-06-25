@@ -142,3 +142,29 @@ class AsyncReader(Reader):
             for f in as_completed(self._futures[:1]):
                 self._buffer += self._futures[0].result()
                 del self._futures[0]
+
+    @classmethod
+    def for_each_chunk_async(cls,
+                             blob: Blob,
+                             chunk_size: int=default_chunk_size,
+                             chunks_to_buffer: int=2,
+                             executor: ThreadPoolExecutor=None):
+        reader = cls(blob, chunk_size, chunks_to_buffer, executor)
+
+        def fetch_chunk(chunk_number):
+            data = reader.fetch_chunk(chunk_number)
+            return chunk_number, data
+
+        chunk_numbers = [i for i in range(reader.number_of_chunks)]
+        futures: typing.Set[Future] = set()
+        while chunk_numbers or futures:
+            if len(futures) < chunks_to_buffer:
+                number_of_chunks_to_fetch = chunks_to_buffer - len(futures)
+                for i in chunk_numbers[:number_of_chunks_to_fetch]:
+                    futures.add(reader._executor.submit(fetch_chunk, i))
+                chunk_numbers = chunk_numbers[number_of_chunks_to_fetch:]
+            for f in as_completed(futures):
+                chunk_number, data = f.result()
+                futures.remove(f)
+                yield chunk_number, data
+                break

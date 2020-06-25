@@ -260,6 +260,20 @@ class TestGSChunkedIOAsyncReader(TestGSChunkedIOReader):
                 self.assertEqual(4, fh.number_of_chunks)
                 self.assertEqual(self.data, fh.read())
 
+    def test_chunked_read_write(self):
+        key = f"test_chunked_read_write/obj"
+        expected_data = os.urandom(13 * 1024)
+        chunk_size = 1001
+        blob = GS.bucket.blob(key)
+        blob.upload_from_file(io.BytesIO(expected_data))
+        blob.reload()
+        chunks = list()
+        for i, chunk in gscio.AsyncReader.for_each_chunk_async(blob, chunk_size=chunk_size):
+            chunks.append((i, chunk))
+        data = b""
+        for _, chunk in sorted(chunks):
+            data += chunk
+        self.assertEqual(data, expected_data)
 
 def _suppress_warnings():
     # Suppress the annoying google gcloud _CLOUD_SDK_CREDENTIALS_WARNING warnings
