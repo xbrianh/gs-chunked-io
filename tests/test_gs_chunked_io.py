@@ -15,6 +15,7 @@ sys.path.insert(0, pkg_root)  # noqa
 
 import gs_chunked_io as gscio
 from gs_chunked_io.writer import _iter_groups, gs_max_parts_per_compose
+from gs_chunked_io.config import default_chunk_size, reader_retries
 
 
 class GS:
@@ -221,6 +222,15 @@ class TestGSChunkedIOReader(unittest.TestCase):
                     break
                 data += reader.read()
                 self.assertEqual(data, self.data)
+
+    def test_fetch_chunk(self):
+        blob = mock.MagicMock()
+        blob.size = 1.1 * default_chunk_size
+        blob.download_as_string = mock.MagicMock()
+        reader = self.ReaderClass(blob)
+        with self.assertRaises(ValueError):
+            reader.fetch_chunk(1)
+        self.assertEqual(reader_retries, blob.download_as_string.call_count)
 
 class TestGSChunkedIOAsyncReader(TestGSChunkedIOReader):
     ReaderClass = gscio.AsyncReader

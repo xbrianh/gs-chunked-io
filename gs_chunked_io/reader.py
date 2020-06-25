@@ -7,7 +7,7 @@ from itertools import islice
 from google.cloud.storage import Client
 from google.cloud.storage.blob import Blob
 
-from gs_chunked_io.config import default_chunk_size
+from gs_chunked_io.config import default_chunk_size, reader_retries
 
 
 class Reader(io.IOBase):
@@ -28,7 +28,15 @@ class Reader(io.IOBase):
     def fetch_chunk(self, chunk_number: int):
         start_chunk = chunk_number * self.chunk_size
         end_chunk = start_chunk + self.chunk_size - 1
-        return self.blob.download_as_string(start=start_chunk, end=end_chunk)
+        if chunk_number == (self.number_of_chunks - 1):
+            expected_part_size = self.blob.size % self.chunk_size
+        else:
+            expected_part_size = self.chunk_size
+        for _ in range(reader_retries):
+            data = self.blob.download_as_string(start=start_chunk, end=end_chunk)
+            if expected_part_size == len(data):
+                return data
+        raise ValueError("Unexpected part size")
 
     def readable(self):
         return True
