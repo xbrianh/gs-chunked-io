@@ -170,9 +170,24 @@ class AsyncWriter(Writer):
         super().__init__(key, bucket, chunk_size, part_callback=part_callback)
         self._executor = executor or ThreadPoolExecutor(max_workers=concurrent_uploads)
         self._futures: typing.Set[Future] = set()
+        self._concurrent_uploads = concurrent_uploads
 
     def writable(self):
         return True
+
+    def put_part_async(self, part_number: int, data: bytes):
+        """
+        Asynchronously put parts in any order. Block when concurrent uploads equals or exceeds `concurrent_uploads`.
+        This should not be used in conjunction with `write`.
+        """
+        if self._concurrent_uploads <= len(self._futures):
+            for _ in as_completed(self._futures):
+                break
+        f = self._executor.submit(self.put_part, part_number, data)
+        self._futures.add(f)
+        for f in set(self._futures):
+            if f.done():
+                self._futures.remove(f)
 
     def write(self, data: bytes):
         self._buffer += data

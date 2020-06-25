@@ -164,8 +164,17 @@ class TestGSChunkedIOAsyncWriter(TestGSChunkedIOWriter):
                 fh.write(data)
             with io.BytesIO() as fh:
                 GS.bucket.get_blob(key).download_to_file(fh)
-                fh.seek(0)
-                self.assertEqual(data, fh.read())
+                self.assertEqual(data, fh.getvalue())
+
+    def test_put_part_async(self):
+        chunks = [os.urandom(10) for _ in range(3)]
+        key = f"test_write/{uuid4()}"
+        with self.WriterClass(key, GS.bucket) as writer:
+            for i, chunk in enumerate(chunks):
+                writer.put_part_async(i, chunk)
+        with io.BytesIO() as fh:
+            GS.bucket.get_blob(key).download_to_file(fh)
+            self.assertEqual(b"".join(chunks), fh.getvalue())
 
 class TestGSChunkedIOReader(unittest.TestCase):
     ReaderClass = gscio.Reader
