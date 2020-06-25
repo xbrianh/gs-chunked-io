@@ -1,11 +1,12 @@
 import io
 import typing
 import uuid
+import requests
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 
 import google.cloud.storage.bucket
 
-from gs_chunked_io.config import default_chunk_size, gs_max_parts_per_compose
+from gs_chunked_io.config import default_chunk_size, gs_max_parts_per_compose, writer_retries
 
 
 class Writer(io.IOBase):
@@ -45,7 +46,13 @@ class Writer(io.IOBase):
     def put_part(self, part_number: int, data: bytes):
         if data:
             part_name = self._name_for_part_number(part_number)
-            self.bucket.blob(part_name).upload_from_file(io.BytesIO(data))
+            for tries_remaining in range(writer_retries - 1, -1, -1):
+                try:
+                    self.bucket.blob(part_name).upload_from_file(io.BytesIO(data))
+                    break
+                except requests.exceptions.ConnectionError:
+                    if 0 == tries_remaining:
+                        raise
             self._part_names.append(part_name)
             if self._part_callback:
                 self._part_callback(part_number, part_name, data)

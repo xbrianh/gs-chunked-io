@@ -2,6 +2,7 @@
 import io
 import os
 import sys
+import requests
 import warnings
 import unittest
 from uuid import uuid4
@@ -15,7 +16,7 @@ sys.path.insert(0, pkg_root)  # noqa
 
 import gs_chunked_io as gscio
 from gs_chunked_io.writer import _iter_groups, gs_max_parts_per_compose
-from gs_chunked_io.config import default_chunk_size, reader_retries
+from gs_chunked_io.config import default_chunk_size, reader_retries, writer_retries
 
 
 class GS:
@@ -133,6 +134,23 @@ class TestGSChunkedIOWriter(unittest.TestCase):
             self.assertIsNotNone(GS.bucket.get_blob(fh._part_names[0]))
             fh.abort()
             self.assertIsNone(GS.bucket.get_blob(fh._part_names[0]))
+
+    def test_put_part(self):
+        bucket = mock.MagicMock()
+        with self.subTest():
+            bucket.blob = mock.MagicMock()
+            key = f"test_write/{uuid4()}"
+            writer = self.WriterClass(key, bucket)
+            writer.put_part(5, os.urandom(10))
+            bucket.blob.assert_called_once()
+        with self.subTest("Should retry connection errors."):
+            bucket.blob = mock.MagicMock(side_effect=requests.exceptions.ConnectionError)
+            key = f"test_write/{uuid4()}"
+            writer = self.WriterClass(key, bucket)
+            bucket.blob.reset_mock()
+            with self.assertRaises(requests.exceptions.ConnectionError):
+                writer.put_part(5, os.urandom(10))
+            self.assertEqual(writer_retries, bucket.blob.call_count)
 
 class TestGSChunkedIOAsyncWriter(TestGSChunkedIOWriter):
     WriterClass = gscio.AsyncWriter
