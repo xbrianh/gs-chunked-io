@@ -1,8 +1,8 @@
 import io
-import typing
 from math import ceil
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from itertools import islice
+from typing import List, Set, Tuple, Generator
 
 from google.cloud.storage import Client
 from google.cloud.storage.blob import Blob
@@ -25,7 +25,7 @@ class Reader(io.IOBase):
         self.number_of_chunks = ceil(self.blob.size / self.chunk_size)
         self._unfetched_chunks = (i for i in range(self.number_of_chunks))
 
-    def fetch_chunk(self, chunk_number: int):
+    def fetch_chunk(self, chunk_number: int) -> bytes:
         start_chunk = chunk_number * self.chunk_size
         end_chunk = start_chunk + self.chunk_size - 1
         if chunk_number == (self.number_of_chunks - 1):
@@ -56,13 +56,13 @@ class Reader(io.IOBase):
         self._pos += len(ret_data)
         return ret_data
 
-    def readinto(self, buff) -> int:
+    def readinto(self, buff: bytearray) -> int:
         d = self.read(len(buff))
         bytes_read = len(d)
         buff[:bytes_read] = d
         return bytes_read
 
-    def for_each_chunk(self):
+    def for_each_chunk(self) -> Generator[bytes, None, None]:
         if self._pos:
             del self._buffer[:self._pos]
             self._pos = 0
@@ -99,7 +99,7 @@ class AsyncReader(Reader):
         super().__init__(blob, chunk_size)
         self._chunks_to_buffer = chunks_to_buffer
         self._executor = executor or ThreadPoolExecutor(max_workers=chunks_to_buffer)
-        self._futures: typing.List[Future] = list()
+        self._futures: List[Future] = list()
 
     def readable(self):
         return True
@@ -113,7 +113,7 @@ class AsyncReader(Reader):
         self._pos += len(ret_data)
         return ret_data
 
-    def for_each_chunk(self):
+    def for_each_chunk(self) -> Generator[bytes, None, None]:
         if self._pos:
             del self._buffer[:self._pos]
             self._pos = 0
@@ -148,7 +148,7 @@ class AsyncReader(Reader):
                              blob: Blob,
                              chunk_size: int=default_chunk_size,
                              chunks_to_buffer: int=2,
-                             executor: ThreadPoolExecutor=None):
+                             executor: ThreadPoolExecutor=None) -> Generator[Tuple[int, bytes], None, None]:
         reader = cls(blob, chunk_size, chunks_to_buffer, executor)
 
         def fetch_chunk(chunk_number):
@@ -156,7 +156,7 @@ class AsyncReader(Reader):
             return chunk_number, data
 
         chunk_numbers = [i for i in range(reader.number_of_chunks)]
-        futures: typing.Set[Future] = set()
+        futures: Set[Future] = set()
         while chunk_numbers or futures:
             if len(futures) < chunks_to_buffer:
                 number_of_chunks_to_fetch = chunks_to_buffer - len(futures)

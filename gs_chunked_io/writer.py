@@ -1,8 +1,8 @@
 import io
-import typing
 import uuid
 import requests
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from typing import List, Set, Callable
 
 import google.cloud.storage.bucket
 
@@ -24,12 +24,12 @@ class Writer(io.IOBase):
                  key: str,
                  bucket: google.cloud.storage.bucket.Bucket,
                  chunk_size: int=default_chunk_size,
-                 part_callback: typing.Callable=None):
+                 part_callback: Callable=None):
         self.key = key
         self.bucket = bucket
         self.chunk_size = chunk_size
         self._part_callback = part_callback
-        self._part_names: typing.List[str] = list()
+        self._part_names: List[str] = list()
         self._buffer = bytearray()
         self._current_part_number = 0
         self._closed = False
@@ -40,7 +40,7 @@ class Writer(io.IOBase):
             raise TypeError("Expected instance of google.cloud.storage.bucket.Bucket, or similar.")
 
     @property
-    def closed(self):
+    def closed(self) -> bool:
         return self._closed
 
     def put_part(self, part_number: int, data: bytes):
@@ -59,7 +59,7 @@ class Writer(io.IOBase):
         else:
             raise ValueError(f"data for part_number={part_number} must not be empty!")
 
-    def writable(self):
+    def writable(self) -> bool:
         return True
 
     def write(self, data: bytes):
@@ -105,12 +105,12 @@ class Writer(io.IOBase):
             for f in as_completed(futures):
                 f.result()  # raises if future errored
 
-    def _compose_parts(self, part_names, dst_part_name):
+    def _compose_parts(self, part_names, dst_part_name) -> str:
         blobs = [self.bucket.blob(name) for name in part_names]
         self.bucket.blob(dst_part_name).compose(blobs)
         return dst_part_name
 
-    def _name_for_part_number(self, part_number):
+    def _name_for_part_number(self, part_number) -> str:
         """
         Compose a Google Storage object name corresponding to `part_number`.
         Since Google Storage shards based on object name, it is more optimal to use names that being with uniformly
@@ -120,7 +120,7 @@ class Writer(io.IOBase):
         part_id = uuid.uuid4()
         return f"{part_id}.{self._upload_id}.gs-chunked-io-part.%06i" % part_number
 
-    def _sorted_part_names(self, part_names):
+    def _sorted_part_names(self, part_names) -> List[str]:
         """
         Sort names by part number.
         """
@@ -164,15 +164,15 @@ class AsyncWriter(Writer):
                  key: str,
                  bucket: google.cloud.storage.bucket.Bucket,
                  chunk_size: int=default_chunk_size,
-                 part_callback: typing.Callable=None,
+                 part_callback: Callable=None,
                  concurrent_uploads: int=4,
                  executor: ThreadPoolExecutor=None):
         super().__init__(key, bucket, chunk_size, part_callback=part_callback)
         self._executor = executor or ThreadPoolExecutor(max_workers=concurrent_uploads)
-        self._futures: typing.Set[Future] = set()
+        self._futures: Set[Future] = set()
         self._concurrent_uploads = concurrent_uploads
 
-    def writable(self):
+    def writable(self) -> bool:
         return True
 
     def put_part_async(self, part_number: int, data: bytes):
