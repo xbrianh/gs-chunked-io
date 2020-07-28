@@ -141,7 +141,7 @@ class TestGSChunkedIOWriter(unittest.TestCase):
             bucket.blob = mock.MagicMock()
             key = f"test_write/{uuid4()}"
             writer = self.WriterClass(key, bucket)
-            writer.put_part(5, os.urandom(10))
+            writer._put_part(5, os.urandom(10))
             bucket.blob.assert_called_once()
         with self.subTest("Should retry connection errors."):
             bucket.blob = mock.MagicMock(side_effect=requests.exceptions.ConnectionError)
@@ -149,7 +149,7 @@ class TestGSChunkedIOWriter(unittest.TestCase):
             writer = self.WriterClass(key, bucket)
             bucket.blob.reset_mock()
             with self.assertRaises(requests.exceptions.ConnectionError):
-                writer.put_part(5, os.urandom(10))
+                writer._put_part(5, os.urandom(10))
             self.assertEqual(writer_retries, bucket.blob.call_count)
 
 class TestGSChunkedIOAsyncWriter(TestGSChunkedIOWriter):

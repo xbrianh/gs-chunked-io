@@ -44,7 +44,7 @@ class Writer(io.IOBase):
     def closed(self) -> bool:
         return self._closed
 
-    def put_part(self, part_number: int, data: bytes):
+    def _put_part(self, part_number: int, data: bytes):
         if data:
             part_name = self._name_for_part_number(part_number)
             for tries_remaining in range(writer_retries - 1, -1, -1):
@@ -67,7 +67,7 @@ class Writer(io.IOBase):
         self._buffer += data
 
         while len(self._buffer) >= self.chunk_size:
-            self.put_part(self._current_part_number, self._buffer[:self.chunk_size])
+            self._put_part(self._current_part_number, self._buffer[:self.chunk_size])
             del self._buffer[:self.chunk_size]
             self._current_part_number += 1
 
@@ -78,7 +78,7 @@ class Writer(io.IOBase):
         if not self._closed:
             self._closed = True
             if self._buffer:
-                self.put_part(self._current_part_number, self._buffer)
+                self._put_part(self._current_part_number, self._buffer)
             self._compose_dest_blob()
 
     def _compose_dest_blob(self):
@@ -210,7 +210,7 @@ class AsyncPartUploader:
     def put_part(self, part_number: int, data: bytes):
         for _ in self.future_chunk_uploads.consume_finished():
             pass
-        self.future_chunk_uploads.put(self._writer.put_part, part_number, data)
+        self.future_chunk_uploads.put(self._writer._put_part, part_number, data)
 
     def close(self):
         for _ in self.future_chunk_uploads.consume():
