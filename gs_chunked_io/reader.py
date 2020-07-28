@@ -8,6 +8,7 @@ from google.cloud.storage import Client
 from google.cloud.storage.blob import Blob
 
 from gs_chunked_io.config import default_chunk_size, reader_retries
+from gs_chunked_io.async_collections import AsyncQueue
 
 
 class Reader(io.IOBase):
@@ -99,7 +100,7 @@ class AsyncReader(Reader):
         super().__init__(blob, chunk_size)
         self._chunks_to_buffer = chunks_to_buffer
         self._executor = executor or ThreadPoolExecutor(max_workers=chunks_to_buffer)
-        self._futures: List[Future] = list()
+        self._future_chunks = AsyncQueue(self._executor, concurrency=self._chunks_to_buffer)
 
     def readable(self):
         return True
@@ -128,20 +129,18 @@ class AsyncReader(Reader):
                 break
 
     def _fetch_async(self, size: int):
-        future_buffer_size = len(self._buffer) - self._pos + self.chunk_size * len(self._futures)
+        future_buffer_size = len(self._buffer) - self._pos + self.chunk_size * len(self._future_chunks)
         desired_future_buffer_size = size + self._chunks_to_buffer * self.chunk_size
         if future_buffer_size < desired_future_buffer_size:
             del self._buffer[:self._pos]
             number_of_chunks_to_fetch = ceil((desired_future_buffer_size - future_buffer_size) / self.chunk_size)
-            self._futures.extend([self._executor.submit(self.fetch_chunk, chunk_number)
-                                 for chunk_number in islice(self._unfetched_chunks, number_of_chunks_to_fetch)])
+            for chunk_number in islice(self._unfetched_chunks, number_of_chunks_to_fetch):
+                self._future_chunks.put(self.fetch_chunk, chunk_number)
             self._pos = 0
 
     def _wait_for_buffer_and_remove_complete_futures(self, expected_buffer_length: int):
-        while len(self._buffer) < expected_buffer_length and self._futures:
-            for f in as_completed(self._futures[:1]):
-                self._buffer += self._futures[0].result()
-                del self._futures[0]
+        while len(self._buffer) < expected_buffer_length and self._future_chunks:
+            self._buffer += self._future_chunks.get()
 
     @classmethod
     def for_each_chunk_async(cls,

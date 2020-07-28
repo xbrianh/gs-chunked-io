@@ -7,6 +7,7 @@ from typing import List, Set, Callable
 import google.cloud.storage.bucket
 
 from gs_chunked_io.config import default_chunk_size, gs_max_parts_per_compose, writer_retries
+from gs_chunked_io.async_collections import AsyncSet
 
 
 class Writer(io.IOBase):
@@ -169,8 +170,8 @@ class AsyncWriter(Writer):
                  executor: ThreadPoolExecutor=None):
         super().__init__(key, bucket, chunk_size, part_callback=part_callback)
         self._executor = executor or ThreadPoolExecutor(max_workers=concurrent_uploads)
-        self._futures: Set[Future] = set()
         self._concurrent_uploads = concurrent_uploads
+        self._future_uploads = AsyncSet(self._executor, concurrency=self._concurrent_uploads)
 
     def writable(self) -> bool:
         return True
@@ -180,36 +181,27 @@ class AsyncWriter(Writer):
         Asynchronously put parts in any order. Block when concurrent uploads equals or exceeds `concurrent_uploads`.
         This should not be used in conjunction with `write`.
         """
-        if self._concurrent_uploads <= len(self._futures):
-            for _ in as_completed(self._futures):
-                break
-        f = self._executor.submit(self.put_part, part_number, data)
-        self._futures.add(f)
-        for f in set(self._futures):
-            if f.done():
-                self._futures.remove(f)
+        for _ in self._future_uploads.consume_finished():
+            pass
+        self._future_uploads.put(self.put_part, part_number, data)
 
     def write(self, data: bytes):
         self._buffer += data
 
         while len(self._buffer) >= self.chunk_size:
-            f = self._executor.submit(self.put_part, self._current_part_number, self._buffer[:self.chunk_size])
-            self._futures.add(f)
+            self._future_uploads.put(self.put_part, self._current_part_number, self._buffer[:self.chunk_size])
             del self._buffer[:self.chunk_size]
             self._current_part_number += 1
 
-        for f in self._futures.copy():
-            if f.done():
-                f.result()  # raises if future errored
-                self._futures.remove(f)
+        for _ in self._future_uploads.consume_finished():
+            pass
 
     def _wait(self):
         """
         Wait for current part uploads to finish.
         """
-        if self._futures:
-            for f in as_completed(self._futures):
-                f.result()  # raises if future errored
+        for _ in self._future_uploads.consume():
+            pass
 
     def _compose_dest_blob(self):
         self._wait()
@@ -218,9 +210,7 @@ class AsyncWriter(Writer):
     def abort(self):
         if not self._closed:
             self._closed = True
-            for f in self._futures:
-                f.cancel()
-            self._wait()
+            self._future_uploads.abort()
             self._delete_parts(self._part_names)
 
 
