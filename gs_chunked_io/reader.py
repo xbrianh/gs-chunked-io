@@ -1,10 +1,9 @@
 import io
 from math import ceil
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from itertools import islice
-from typing import List, Set, Tuple, Generator
+from typing import Optional, Generator
 
-from google.cloud.storage import Client
 from google.cloud.storage.blob import Blob
 
 from gs_chunked_io.config import default_chunk_size, reader_retries
@@ -142,28 +141,37 @@ class AsyncReader(Reader):
         while len(self._buffer) < expected_buffer_length and self._future_chunks:
             self._buffer += self._future_chunks.get()
 
-    @classmethod
-    def for_each_chunk_async(cls,
-                             blob: Blob,
-                             chunk_size: int=default_chunk_size,
-                             chunks_to_buffer: int=2,
-                             executor: ThreadPoolExecutor=None) -> Generator[Tuple[int, bytes], None, None]:
-        reader = cls(blob, chunk_size, chunks_to_buffer, executor)
+def for_each_chunk(blob: Blob,
+                   chunk_size: int=default_chunk_size,
+                   executor: Optional[ThreadPoolExecutor]=None,
+                   chunks_to_buffer: int=2):
+    """
+    Fetch chunks and yield in order. If `executor` is not None, chunks are downloaded with concurrency equal to
+    `chunks_to_buffer`
+    """
+    reader = Reader(blob, chunk_size=chunk_size)
+    if executor:
+        future_chunk_downloads = AsyncQueue(executor, chunks_to_buffer)
+        for chunk_number in reader._unfetched_chunks:
+            future_chunk_downloads.put(reader.fetch_chunk, chunk_number)
+        for chunk in future_chunk_downloads.consume():
+            yield chunk
+    else:
+        for chunk_number in reader._unfetched_chunks:
+            yield reader.fetch_chunk(chunk_number)
 
-        def fetch_chunk(chunk_number):
-            data = reader.fetch_chunk(chunk_number)
-            return chunk_number, data
+def for_each_chunk_async(blob: Blob,
+                         executor: ThreadPoolExecutor,
+                         chunk_size: int=default_chunk_size):
+    """
+    Fetch chunks with concurrency is equal to the number of chunks available in the executor.
+    chunks are returned out of order.
+    """
+    reader = Reader(blob, chunk_size)
 
-        chunk_numbers = [i for i in range(reader.number_of_chunks)]
-        futures: Set[Future] = set()
-        while chunk_numbers or futures:
-            if len(futures) < chunks_to_buffer:
-                number_of_chunks_to_fetch = chunks_to_buffer - len(futures)
-                for i in chunk_numbers[:number_of_chunks_to_fetch]:
-                    futures.add(reader._executor.submit(fetch_chunk, i))
-                chunk_numbers = chunk_numbers[number_of_chunks_to_fetch:]
-            for f in as_completed(futures):
-                chunk_number, data = f.result()
-                futures.remove(f)
-                yield chunk_number, data
-                break
+    def fetch_chunk(chunk_number):
+        data = reader.fetch_chunk(chunk_number)
+        return chunk_number, data
+
+    for chunk_number, chunk in executor.map(fetch_chunk, range(reader.number_of_chunks)):
+        yield chunk_number, chunk

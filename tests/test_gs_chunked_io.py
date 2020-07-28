@@ -229,26 +229,10 @@ class TestGSChunkedIOReader(unittest.TestCase):
 
     def test_for_each_chunk(self):
         chunk_size = len(self.data) // 3
-        with self.subTest("Should work without initial read"):
-            with self.ReaderClass(self.blob, chunk_size=chunk_size) as reader:
-                data = bytes()
-                for chunk in reader.for_each_chunk():
-                    data += chunk
-                self.assertEqual(data, self.data)
-        with self.subTest("Should be able to resume after initial read"):
-            with self.ReaderClass(self.blob, chunk_size=chunk_size) as reader:
-                data = reader.read(reader.chunk_size // 2)
-                for chunk in reader.for_each_chunk():
-                    data += chunk
-                self.assertEqual(data, self.data)
-        with self.subTest("Should be able to finish with trailing read"):
-            with self.ReaderClass(self.blob, chunk_size=chunk_size) as reader:
-                data = bytes()
-                for chunk in reader.for_each_chunk():
-                    data += chunk
-                    break
-                data += reader.read()
-                self.assertEqual(data, self.data)
+        data = bytes()
+        for chunk in gscio.for_each_chunk(self.blob, chunk_size=chunk_size):
+            data += chunk
+        self.assertEqual(data, self.data)
 
     def test_fetch_chunk(self):
         blob = mock.MagicMock()
@@ -277,12 +261,13 @@ class TestGSChunkedIOAsyncReader(TestGSChunkedIOReader):
         blob.upload_from_file(io.BytesIO(expected_data))
         blob.reload()
         chunks = list()
-        for i, chunk in gscio.AsyncReader.for_each_chunk_async(blob, chunk_size=chunk_size):
-            chunks.append((i, chunk))
-        data = b""
-        for _, chunk in sorted(chunks):
-            data += chunk
-        self.assertEqual(data, expected_data)
+        with ThreadPoolExecutor() as e:
+            for i, chunk in gscio.for_each_chunk_async(blob, e, chunk_size=chunk_size):
+                chunks.append((i, chunk))
+            data = b""
+            for _, chunk in sorted(chunks):
+                data += chunk
+            self.assertEqual(data, expected_data)
 
 def _suppress_warnings():
     # Suppress the annoying google gcloud _CLOUD_SDK_CREDENTIALS_WARNING warnings
