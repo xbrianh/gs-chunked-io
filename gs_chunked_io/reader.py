@@ -62,18 +62,6 @@ class Reader(io.IOBase):
         buff[:bytes_read] = d
         return bytes_read
 
-    def for_each_chunk(self) -> Generator[bytes, None, None]:
-        if self._pos:
-            del self._buffer[:self._pos]
-            self._pos = 0
-        for chunk_number in self._unfetched_chunks:
-            self._buffer += self._fetch_chunk(chunk_number)
-            ret_data = self._buffer[:self.chunk_size]
-            del self._buffer[:self.chunk_size]
-            yield ret_data
-        if self._buffer:
-            yield self._buffer
-
     def seek(self, *args, **kwargs):
         raise OSError()
 
@@ -112,20 +100,6 @@ class AsyncReader(Reader):
         ret_data = bytes(memoryview(self._buffer)[self._pos:self._pos + size])
         self._pos += len(ret_data)
         return ret_data
-
-    def for_each_chunk(self) -> Generator[bytes, None, None]:
-        if self._pos:
-            del self._buffer[:self._pos]
-            self._pos = 0
-        while True:
-            self._fetch_async(self.chunk_size)
-            self._wait_for_buffer_and_remove_complete_futures(expected_buffer_length=self.chunk_size)
-            ret_data = self._buffer[:self.chunk_size]
-            del self._buffer[:self.chunk_size]
-            if ret_data:
-                yield ret_data
-            else:
-                break
 
     def _fetch_async(self, size: int):
         future_buffer_size = len(self._buffer) - self._pos + self.chunk_size * len(self._future_chunks)

@@ -228,13 +228,6 @@ class TestGSChunkedIOReader(unittest.TestCase):
             bytes_read = fh.readinto(buff)
             self.assertEqual(self.data, buff[:bytes_read])
 
-    def test_for_each_chunk(self):
-        chunk_size = len(self.data) // 3
-        data = bytes()
-        for chunk in gscio.for_each_chunk(self.blob, chunk_size=chunk_size):
-            data += chunk
-        self.assertEqual(data, self.data)
-
     def test_fetch_chunk(self):
         blob = mock.MagicMock()
         blob.size = 1.1 * default_chunk_size
