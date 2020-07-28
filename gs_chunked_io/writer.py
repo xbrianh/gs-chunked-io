@@ -1,8 +1,8 @@
 import io
 import uuid
 import requests
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
-from typing import List, Set, Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Callable
 
 import google.cloud.storage.bucket
 
@@ -176,26 +176,6 @@ class AsyncWriter(Writer):
     def writable(self) -> bool:
         return True
 
-    def put_part_async(self, part_number: int, data: bytes):
-        """
-        Asynchronously put parts in any order. Block when concurrent uploads equals or exceeds `concurrent_uploads`.
-        This should not be used in conjunction with `write`.
-        """
-        for _ in self._future_uploads.consume_finished():
-            pass
-        self._future_uploads.put(self.put_part, part_number, data)
-
-    def write(self, data: bytes):
-        self._buffer += data
-
-        while len(self._buffer) >= self.chunk_size:
-            self._future_uploads.put(self.put_part, self._current_part_number, self._buffer[:self.chunk_size])
-            del self._buffer[:self.chunk_size]
-            self._current_part_number += 1
-
-        for _ in self._future_uploads.consume_finished():
-            pass
-
     def _wait(self):
         """
         Wait for current part uploads to finish.
@@ -213,6 +193,35 @@ class AsyncWriter(Writer):
             self._future_uploads.abort()
             self._delete_parts(self._part_names)
 
+class AsyncPartUploader:
+    """
+    Concurrently put parts in any order. `put_part` blocks when concurrent uploads equals or exceeds
+    `concurrent_uploads`. The executor should have equal or more threads than `concurrent_uploads`.
+    """
+
+    def __init__(self,
+                 key: str,
+                 bucket: google.cloud.storage.bucket.Bucket,
+                 executor: ThreadPoolExecutor,
+                 concurrent_uploads: int=4):
+        self._writer = Writer(key, bucket)
+        self.future_chunk_uploads = AsyncSet(executor, concurrency=concurrent_uploads)
+
+    def put_part(self, part_number: int, data: bytes):
+        for _ in self.future_chunk_uploads.consume_finished():
+            pass
+        self.future_chunk_uploads.put(self._writer.put_part, part_number, data)
+
+    def close(self):
+        for _ in self.future_chunk_uploads.consume():
+            pass
+        self._writer.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args, **kwargs):
+        self.close()
 
 def _iter_groups(lst: list, group_size=32):
     for i in range(0, len(lst), group_size):
