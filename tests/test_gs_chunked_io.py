@@ -241,7 +241,7 @@ class TestGSChunkedIOReader(unittest.TestCase):
         blob.download_as_string = mock.MagicMock()
         reader = self.ReaderClass(blob)
         with self.assertRaises(ValueError):
-            reader.fetch_chunk(1)
+            reader._fetch_chunk(1)
         self.assertEqual(reader_retries, blob.download_as_string.call_count)
 
 class TestGSChunkedIOAsyncReader(TestGSChunkedIOReader):

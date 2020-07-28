@@ -25,7 +25,7 @@ class Reader(io.IOBase):
         self.number_of_chunks = ceil(self.blob.size / self.chunk_size)
         self._unfetched_chunks = (i for i in range(self.number_of_chunks))
 
-    def fetch_chunk(self, chunk_number: int) -> bytes:
+    def _fetch_chunk(self, chunk_number: int) -> bytes:
         start_chunk = chunk_number * self.chunk_size
         end_chunk = start_chunk + self.chunk_size - 1
         if chunk_number == (self.number_of_chunks - 1):
@@ -49,7 +49,7 @@ class Reader(io.IOBase):
             del self._buffer[:self._pos]
             number_of_chunks_to_fetch = ceil((size - len(self._buffer)) / self.chunk_size)
             for chunk_number in islice(self._unfetched_chunks, number_of_chunks_to_fetch):
-                self._buffer += self.fetch_chunk(chunk_number)
+                self._buffer += self._fetch_chunk(chunk_number)
             self._pos = 0
 
         ret_data = bytes(memoryview(self._buffer)[self._pos:self._pos + size])
@@ -67,7 +67,7 @@ class Reader(io.IOBase):
             del self._buffer[:self._pos]
             self._pos = 0
         for chunk_number in self._unfetched_chunks:
-            self._buffer += self.fetch_chunk(chunk_number)
+            self._buffer += self._fetch_chunk(chunk_number)
             ret_data = self._buffer[:self.chunk_size]
             del self._buffer[:self.chunk_size]
             yield ret_data
@@ -134,7 +134,7 @@ class AsyncReader(Reader):
             del self._buffer[:self._pos]
             number_of_chunks_to_fetch = ceil((desired_future_buffer_size - future_buffer_size) / self.chunk_size)
             for chunk_number in islice(self._unfetched_chunks, number_of_chunks_to_fetch):
-                self._future_chunks.put(self.fetch_chunk, chunk_number)
+                self._future_chunks.put(self._fetch_chunk, chunk_number)
             self._pos = 0
 
     def _wait_for_buffer_and_remove_complete_futures(self, expected_buffer_length: int):
@@ -153,12 +153,12 @@ def for_each_chunk(blob: Blob,
     if executor:
         future_chunk_downloads = AsyncQueue(executor, chunks_to_buffer)
         for chunk_number in reader._unfetched_chunks:
-            future_chunk_downloads.put(reader.fetch_chunk, chunk_number)
+            future_chunk_downloads.put(reader._fetch_chunk, chunk_number)
         for chunk in future_chunk_downloads.consume():
             yield chunk
     else:
         for chunk_number in reader._unfetched_chunks:
-            yield reader.fetch_chunk(chunk_number)
+            yield reader._fetch_chunk(chunk_number)
 
 def for_each_chunk_async(blob: Blob,
                          executor: ThreadPoolExecutor,
@@ -170,7 +170,7 @@ def for_each_chunk_async(blob: Blob,
     reader = Reader(blob, chunk_size)
 
     def fetch_chunk(chunk_number):
-        data = reader.fetch_chunk(chunk_number)
+        data = reader._fetch_chunk(chunk_number)
         return chunk_number, data
 
     for chunk_number, chunk in executor.map(fetch_chunk, range(reader.number_of_chunks)):
