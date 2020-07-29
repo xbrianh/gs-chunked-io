@@ -43,14 +43,27 @@ def tearDownModule():
     GS.client._http.close()
 
 class TestGSChunkedIOWriter(unittest.TestCase):
-    WriterClass = gscio.Writer
-
     def setUp(self):
         _suppress_warnings()
 
+    def duration_subtests(self):
+        print()
+        subtests = [
+            ("sync", None),
+            ("async", 4),
+        ]
+        for subtest_name, threads in subtests:
+            with self.subTest(subtest_name):
+                start_time = time.time()
+                try:
+                    yield subtest_name, threads
+                except GeneratorExit:
+                    return
+                print(self.id(), "duration", subtest_name, time.time() - start_time)
+
     def test_writer_interface(self):
         bucket = mock.MagicMock()
-        writer = self.WriterClass("fake_key", bucket)
+        writer = gscio.Writer("fake_key", bucket)
         with self.assertRaises(OSError):
             writer.fileno()
         with self.assertRaises(OSError):
@@ -94,89 +107,75 @@ class TestGSChunkedIOWriter(unittest.TestCase):
             self._test_write_object(data, len(data) // (1 + gs_max_parts_per_compose))
         with self.subTest("Shouldn't be able to pass in a string for bucket"):
             with self.assertRaises(TypeError):
-                self._test_write_object(data, len(data) // 3, "not-a-bucket")
-            
+                with gscio.Writer("some key", "not a bucket") as fh:
+                    pass
 
     def _test_write_object(self, data: bytes, chunk_size: int, bucket=None):
         bucket = bucket or GS.bucket
         key = f"test_write/{uuid4()}"
-        with self.WriterClass(key, bucket, chunk_size=chunk_size) as fh:
-            fh.write(data)
-        with io.BytesIO() as fh:
-            GS.bucket.get_blob(key).download_to_file(fh)
-            fh.seek(0)
-            self.assertEqual(data, fh.read())
+        for test_name, threads in self.duration_subtests():
+            with gscio.Writer(key, bucket, chunk_size=chunk_size, threads=threads) as fh:
+                fh.write(data)
+            with io.BytesIO() as fh:
+                GS.bucket.get_blob(key).download_to_file(fh)
+                fh.seek(0)
+                self.assertEqual(data, fh.read())
 
     def test_part_callback(self):
         chunk_size = 7
         number_of_parts = 5
-        parts_called = list()
         data = os.urandom(number_of_parts * chunk_size)
 
         def cb(part_number, part_name, chunk_data):
             self.assertEqual(chunk_data, data[part_number * chunk_size : (1 + part_number) * chunk_size])
             parts_called.append(part_number)
 
-        key = f"test_write/{uuid4()}"
-        with self.WriterClass(key, GS.bucket, chunk_size=chunk_size, part_callback=cb) as fh:
-            fh.write(data)
-
-        self.assertEqual(number_of_parts, len(parts_called))
+        for test_name, threads in self.duration_subtests():
+            parts_called = list()
+            key = f"test_write/{uuid4()}"
+            with gscio.Writer(key, GS.bucket, chunk_size=chunk_size, part_callback=cb, threads=threads) as fh:
+                fh.write(data)
+            self.assertEqual(number_of_parts, len(parts_called))
 
     def test_abort(self):
-        key = f"test_write/{uuid4()}"
         data = os.urandom(7 * 1024)
         chunk_size = len(data) // 3
-        with self.WriterClass(key, GS.bucket, chunk_size=chunk_size) as fh:
-            fh.write(data[:chunk_size])
-            if hasattr(fh, "_wait"):
-                fh._wait()
-            self.assertEqual(1, len(fh._part_names))
-            self.assertIsNotNone(GS.bucket.get_blob(fh._part_names[0]))
-            fh.abort()
-            self.assertIsNone(GS.bucket.get_blob(fh._part_names[0]))
+        for test_name, threads in self.duration_subtests():
+            key = f"test_write/{uuid4()}"
+            with gscio.Writer(key, GS.bucket, chunk_size=chunk_size, threads=threads) as fh:
+                fh.write(data[:chunk_size])
+                fh.wait()
+                self.assertEqual(1, len(fh._part_names))
+                self.assertIsNotNone(GS.bucket.get_blob(fh._part_names[0]))
+                fh.abort()
+                self.assertIsNone(GS.bucket.get_blob(fh._part_names[0]))
 
     def test_put_part(self):
         bucket = mock.MagicMock()
         with self.subTest():
             bucket.blob = mock.MagicMock()
             key = f"test_write/{uuid4()}"
-            writer = self.WriterClass(key, bucket)
+            writer = gscio.Writer(key, bucket)
             writer._put_part(5, os.urandom(10))
             bucket.blob.assert_called_once()
         with self.subTest("Should retry connection errors."):
             bucket.blob = mock.MagicMock(side_effect=requests.exceptions.ConnectionError)
             key = f"test_write/{uuid4()}"
-            writer = self.WriterClass(key, bucket)
+            writer = gscio.Writer(key, bucket)
             bucket.blob.reset_mock()
             with self.assertRaises(requests.exceptions.ConnectionError):
                 writer._put_part(5, os.urandom(10))
             self.assertEqual(writer_retries, bucket.blob.call_count)
 
-class TestGSChunkedIOAsyncWriter(TestGSChunkedIOWriter):
-    WriterClass = gscio.AsyncWriter
-
-    def test_pass_in_executor(self):
-        data = os.urandom(1024)
-        chunk_size = len(data) // 3
+    def test_async_part_uploader(self):
+        chunks = [os.urandom(10) for _ in range(7)]
         key = f"test_write/{uuid4()}"
-        with ThreadPoolExecutor() as e:
-            with self.WriterClass(key, GS.bucket, chunk_size=chunk_size, executor=e) as fh:
-                fh.write(data)
-            with io.BytesIO() as fh:
-                GS.bucket.get_blob(key).download_to_file(fh)
-                self.assertEqual(data, fh.getvalue())
-
-    def test_put_part_async(self):
-        chunks = [os.urandom(10) for _ in range(3)]
-        key = f"test_write/{uuid4()}"
-        with ThreadPoolExecutor() as e:
-            with gscio.AsyncPartUploader(key, GS.bucket, e) as writer:
-                for i, chunk in enumerate(chunks):
-                    writer.put_part(i, chunk)
-            with io.BytesIO() as fh:
-                GS.bucket.get_blob(key).download_to_file(fh)
-                self.assertEqual(b"".join(chunks), fh.getvalue())
+        with gscio.AsyncPartUploader(key, GS.bucket, threads=4) as uploader:
+            for i, chunk in enumerate(chunks):
+                uploader.put_part(i, chunk)
+        with io.BytesIO() as fh:
+            GS.bucket.get_blob(key).download_to_file(fh)
+            self.assertEqual(b"".join(chunks), fh.getvalue())
 
 class TestGSChunkedIOReader(unittest.TestCase):
     def setUp(self):

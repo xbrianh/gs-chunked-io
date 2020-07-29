@@ -1,8 +1,8 @@
 import io
 import uuid
 import requests
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Callable
+from concurrent.futures import ThreadPoolExecutor
+from typing import List, Callable, Optional, Iterable
 
 import google.cloud.storage.bucket
 
@@ -18,14 +18,20 @@ class Writer(io.IOBase):
     described here: https://cloud.google.com/storage/docs/composite-objects. An attempt is made to clean up
     incomplete or aborted writes.
 
-    if the `part_callback` argument is provided during construction, it will be called for each part as uploaded, with
-    part number, part blob key, and part data as arguments.
+    if `part_callback` is provided, will be called for each part with part number, part blob key, and part data as
+    arguments.
+
+    Chunks are uploaded with concurrency equal to `threads`. If the maximum number of uploads is currently in progress,
+    `write` blocks until an upload slot becomes available.
+
+    Concurrency can be disabled by passing in`threads=None`.
     """
     def __init__(self,
                  key: str,
                  bucket: google.cloud.storage.bucket.Bucket,
                  chunk_size: int=default_chunk_size,
-                 part_callback: Callable=None):
+                 part_callback: Optional[Callable[[int, str, bytes], None]]=None,
+                 threads: Optional[int]=4):
         self.key = key
         self.bucket = bucket
         self.chunk_size = chunk_size
@@ -35,6 +41,13 @@ class Writer(io.IOBase):
         self._current_part_number = 0
         self._closed = False
         self._upload_id = uuid.uuid4()
+        if threads is not None:
+            assert 1 <= threads
+            max_workers = max(threads, 8)
+            self.executor: Optional[ThreadPoolExecutor] = ThreadPoolExecutor(max_workers=max_workers)
+            self.future_chunk_uploads = AsyncSet(self.executor, concurrency=threads)
+        else:
+            self.executor = None
         try:
             bucket.blob
         except AttributeError:
@@ -65,9 +78,13 @@ class Writer(io.IOBase):
 
     def write(self, data: bytes):
         self._buffer += data
-
         while len(self._buffer) >= self.chunk_size:
-            self._put_part(self._current_part_number, self._buffer[:self.chunk_size])
+            if self.executor:
+                for _ in self.future_chunk_uploads.consume_finished():
+                    pass
+                self.future_chunk_uploads.put(self._put_part, self._current_part_number, self._buffer[:self.chunk_size])
+            else:
+                self._put_part(self._current_part_number, self._buffer[:self.chunk_size])
             del self._buffer[:self.chunk_size]
             self._current_part_number += 1
 
@@ -80,19 +97,26 @@ class Writer(io.IOBase):
             if self._buffer:
                 self._put_part(self._current_part_number, self._buffer)
             self._compose_dest_blob()
+            if self.executor:
+                self.executor.shutdown()
 
     def _compose_dest_blob(self):
+        self.wait()
         part_names = self._sorted_part_names(self._part_names)
         part_numbers = [len(part_names)]
         parts_to_delete = set(part_names)
         while gs_max_parts_per_compose < len(part_names):
             name_groups = [names for names in _iter_groups(part_names, group_size=gs_max_parts_per_compose)]
             new_part_numbers = list(range(part_numbers[-1], part_numbers[-1] + len(name_groups)))
-            with ThreadPoolExecutor(max_workers=8) as e:
-                futures = [e.submit(self._compose_parts, names, self._name_for_part_number(new_part_number))
-                           for names, new_part_number in zip(name_groups, new_part_numbers)]
-                part_names = self._sorted_part_names([f.result() for f in as_completed(futures)])
-                parts_to_delete.update(part_names)
+            if self.executor:
+                part_names = self.executor.map(self._compose_parts,
+                                               name_groups,
+                                               [self._name_for_part_number(n) for n in new_part_numbers])
+                part_names = self._sorted_part_names(part_names)
+            else:
+                part_names = [self._compose_parts(names, self._name_for_part_number(new_part_number))
+                              for names, new_part_number in zip(name_groups, new_part_numbers)]
+            parts_to_delete.update(part_names)
             part_numbers = new_part_numbers
         self._compose_parts(part_names, self.key)
         self._delete_parts(parts_to_delete)
@@ -101,10 +125,12 @@ class Writer(io.IOBase):
         def _del(name):
             self.bucket.blob(name).delete()
 
-        with ThreadPoolExecutor(max_workers=8) as e:
-            futures = [e.submit(_del, name) for name in part_names]
-            for f in as_completed(futures):
-                f.result()  # raises if future errored
+        if self.executor:
+            for _ in self.executor.map(_del, part_names):
+                pass
+        else:
+            for name in part_names:
+                _del(name)
 
     def _compose_parts(self, part_names, dst_part_name) -> str:
         blobs = [self.bucket.blob(name) for name in part_names]
@@ -121,12 +147,21 @@ class Writer(io.IOBase):
         part_id = uuid.uuid4()
         return f"{part_id}.{self._upload_id}.gs-chunked-io-part.%06i" % part_number
 
-    def _sorted_part_names(self, part_names) -> List[str]:
+    def _sorted_part_names(self, part_names: Iterable[str]) -> List[str]:
         """
         Sort names by part number.
         """
         return [p[1]
                 for p in sorted([(name.rsplit(".", 1)[1], name) for name in part_names])]
+
+    def wait(self):
+        """
+        Wait for all concurrent uploads to finish.
+        If `executor` is None, this method does nothing.
+        """
+        if self.executor:
+            for _ in self.future_chunk_uploads.consume():
+                pass
 
     def abort(self):
         """
@@ -134,6 +169,8 @@ class Writer(io.IOBase):
         """
         if not self._closed:
             self._closed = True
+            if self.executor:
+                self.future_chunk_uploads.abort()
             self._delete_parts(self._part_names)
 
     def __del__(self, *args, **kwargs):
@@ -152,46 +189,9 @@ class Writer(io.IOBase):
     def truncate(self, *args, **kwargs):
         raise NotImplementedError()
 
-
-class AsyncWriter(Writer):
-    """
-    Writable stream on top of GS blob. Uploads are performed in the background.
-
-    Chunks of `chunk_size` bytes are uploaded as individual blobs and composed into a multipart object using the API
-    described here: https://cloud.google.com/storage/docs/composite-objects. An attempt is made to clean up
-    incomplete or aborted writes.
-    """
-    def __init__(self,
-                 key: str,
-                 bucket: google.cloud.storage.bucket.Bucket,
-                 chunk_size: int=default_chunk_size,
-                 part_callback: Callable=None,
-                 concurrent_uploads: int=4,
-                 executor: ThreadPoolExecutor=None):
-        super().__init__(key, bucket, chunk_size, part_callback=part_callback)
-        self._executor = executor or ThreadPoolExecutor(max_workers=concurrent_uploads)
-        self._concurrent_uploads = concurrent_uploads
-        self._future_uploads = AsyncSet(self._executor, concurrency=self._concurrent_uploads)
-
-    def writable(self) -> bool:
-        return True
-
-    def _wait(self):
-        """
-        Wait for current part uploads to finish.
-        """
-        for _ in self._future_uploads.consume():
-            pass
-
-    def _compose_dest_blob(self):
-        self._wait()
-        super()._compose_dest_blob()
-
-    def abort(self):
-        if not self._closed:
-            self._closed = True
-            self._future_uploads.abort()
-            self._delete_parts(self._part_names)
+def _iter_groups(lst: list, group_size=32):
+    for i in range(0, len(lst), group_size):
+        yield lst[i:i + group_size]
 
 class AsyncPartUploader:
     """
@@ -202,10 +202,11 @@ class AsyncPartUploader:
     def __init__(self,
                  key: str,
                  bucket: google.cloud.storage.bucket.Bucket,
-                 executor: ThreadPoolExecutor,
-                 concurrent_uploads: int=4):
-        self._writer = Writer(key, bucket)
-        self.future_chunk_uploads = AsyncSet(executor, concurrency=concurrent_uploads)
+                 threads: int=4):
+        assert 1 <= threads
+        self._writer = Writer(key, bucket, threads=threads)
+        self.executor = ThreadPoolExecutor(max_workers=threads)
+        self.future_chunk_uploads = AsyncSet(self.executor, concurrency=threads)
 
     def put_part(self, part_number: int, data: bytes):
         for _ in self.future_chunk_uploads.consume_finished():
@@ -216,13 +217,10 @@ class AsyncPartUploader:
         for _ in self.future_chunk_uploads.consume():
             pass
         self._writer.close()
+        self.executor.shutdown()
 
     def __enter__(self):
         return self
 
     def __exit__(self, *args, **kwargs):
         self.close()
-
-def _iter_groups(lst: list, group_size=32):
-    for i in range(0, len(lst), group_size):
-        yield lst[i:i + group_size]
