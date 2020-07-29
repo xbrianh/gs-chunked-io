@@ -2,6 +2,7 @@
 import io
 import os
 import sys
+import time
 import requests
 import warnings
 import unittest
@@ -178,10 +179,20 @@ class TestGSChunkedIOAsyncWriter(TestGSChunkedIOWriter):
                 self.assertEqual(b"".join(chunks), fh.getvalue())
 
 class TestGSChunkedIOReader(unittest.TestCase):
-    ReaderClass = gscio.Reader
-
     def setUp(self):
         _suppress_warnings()
+
+    def duration_subtests(self):
+        print()
+        subtests = [
+            ("sync", None),
+            ("async", 3),
+        ]
+        for subtest_name, threads in subtests:
+            with self.subTest(subtest_name):
+                start_time = time.time()
+                yield subtest_name, threads 
+                print(self.id(), "duration", subtest_name, time.time() - start_time)
 
     @classmethod
     def setUpClass(cls):
@@ -194,7 +205,7 @@ class TestGSChunkedIOReader(unittest.TestCase):
     def test_reader_interface(self):
         blob = mock.MagicMock()
         blob.size = 123
-        reader = self.ReaderClass(blob)
+        reader = gscio.Reader(blob)
         with self.assertRaises(OSError):
             reader.fileno()
         with self.assertRaises(OSError):
@@ -217,35 +228,27 @@ class TestGSChunkedIOReader(unittest.TestCase):
 
     def test_read(self):
         chunk_size = len(self.data) // 3
-        with self.ReaderClass(self.blob, chunk_size=chunk_size) as fh:
-            self.assertEqual(4, fh.number_of_chunks)
-            self.assertEqual(self.data, fh.read())
+        for test_name, threads in self.duration_subtests():
+            with gscio.Reader(self.blob, chunk_size=chunk_size, threads=threads) as fh:
+                self.assertEqual(4, fh.number_of_chunks)
+                self.assertEqual(self.data, fh.read())
 
     def test_readinto(self):
         chunk_size = len(self.data) // 3
         buff = bytearray(2 * len(self.data))
-        with self.ReaderClass(self.blob, chunk_size=chunk_size) as fh:
-            bytes_read = fh.readinto(buff)
-            self.assertEqual(self.data, buff[:bytes_read])
+        for test_name, threads in self.duration_subtests():
+            with gscio.Reader(self.blob, chunk_size=chunk_size, threads=threads) as fh:
+                bytes_read = fh.readinto(buff)
+                self.assertEqual(self.data, buff[:bytes_read])
 
     def test_fetch_chunk(self):
         blob = mock.MagicMock()
         blob.size = 1.1 * default_chunk_size
         blob.download_as_string = mock.MagicMock()
-        reader = self.ReaderClass(blob)
+        reader = gscio.Reader(blob, threads=None)
         with self.assertRaises(ValueError):
             reader._fetch_chunk(1)
         self.assertEqual(reader_retries, blob.download_as_string.call_count)
-
-class TestGSChunkedIOAsyncReader(TestGSChunkedIOReader):
-    ReaderClass = gscio.AsyncReader
-
-    def test_pass_in_executor(self):
-        chunk_size = len(self.data) // 3
-        with ThreadPoolExecutor() as e:
-            with self.ReaderClass(self.blob, chunk_size=chunk_size, executor=e) as fh:
-                self.assertEqual(4, fh.number_of_chunks)
-                self.assertEqual(self.data, fh.read())
 
     def test_chunked_read_write(self):
         key = f"test_chunked_read_write/obj"
@@ -255,13 +258,12 @@ class TestGSChunkedIOAsyncReader(TestGSChunkedIOReader):
         blob.upload_from_file(io.BytesIO(expected_data))
         blob.reload()
         chunks = list()
-        with ThreadPoolExecutor() as e:
-            for i, chunk in gscio.for_each_chunk_async(blob, e, chunk_size=chunk_size):
-                chunks.append((i, chunk))
-            data = b""
-            for _, chunk in sorted(chunks):
-                data += chunk
-            self.assertEqual(data, expected_data)
+        for i, chunk in gscio.for_each_chunk_async(blob, chunk_size=chunk_size, threads=2):
+            chunks.append((i, chunk))
+        data = b""
+        for _, chunk in sorted(chunks):
+            data += chunk
+        self.assertEqual(data, expected_data)
 
 def _suppress_warnings():
     # Suppress the annoying google gcloud _CLOUD_SDK_CREDENTIALS_WARNING warnings
