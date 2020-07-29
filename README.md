@@ -1,7 +1,9 @@
 # gs-chunked-io: Streams for Google Storage
 _gs-chunked-io_ provides transparently chunked io streams for google storage objects.
-Writable streams are managed as multipart objects that are composed when the stream is closed.
+Writable streams are managed as multipart objects, composed when the stream is closed.
 
+IO opperations are concurrent by default. The number of concurrent threads can be adjusted using the `threads`
+parameter, or disabled entirely with `threads=None`.
 ```
 import gs_chunked_io as gscio
 from google.cloud.storage import Client
@@ -14,30 +16,20 @@ blob = bucket.get_blob("my-key)
 with gscio.Reader(blob) as fh:
     fh.read(size)
 
-# Readable stream, download in background:
-with gscio.AsyncReader(blob) as fh:
-    fh.read(size)
-
 # Writable stream:
 with gscio.Writer("my_new_key", bucket) as fh:
     fh.write(data)
 
-# Writable stream, upload in background:
-with gscio.AsyncWriter("my_new_key", bucket) as fh:
-    fh.write(data)
-
 # Process blob in chunks:
-with gscio.Reader(blob) as reader:
-    for chunk in reader.for_each_chunk():
-        my_chunk_processor(chunk)
+for chunk in gscio.for_each_chunk(blob):
+    my_chunk_processor(chunk)
 
 # Multipart copy with processing:
 dst_bucket = client.bucket("my_dest_bucket")
-with gscio.Writer("my_dest_key", dst_bucket) fh_write:
-    with gscio.AsyncReader(blob) as reader:
-        for chunk in reader.for_each_chunk(blob):
-            process_my_chunk(chunk)
-            fh_write(chunk)
+with gscio.Writer("my_dest_key", dst_bucket) as writer:
+    for chunk in gscio.for_each_chunk(blob)
+	    process_my_chunk(chunk)
+	    writer(chunk)
 
 # Extract .tar.gz on the fly:
 import gzip
