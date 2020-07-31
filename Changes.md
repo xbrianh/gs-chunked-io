@@ -1,3 +1,6 @@
+# Changes for v0.4.1 (2020-07-31)
+Reader sets blob.chunk_size (#54)
+
 # Changes for v0.4.0 (2020-07-29)
 Remove AsyncWriter (#52)
 Remove AsyncReader (#51)
