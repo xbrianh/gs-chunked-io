@@ -9,6 +9,8 @@ from gs_chunked_io.config import default_chunk_size, reader_retries
 from gs_chunked_io.async_collections import AsyncQueue
 
 
+_BLOB_CHUNK_SIZE_UNIT = 262144
+
 class Reader(io.IOBase):
     """
     Readable stream on top of GS blob. Bytes are fetched in chunks of `chunk_size`.
@@ -20,6 +22,11 @@ class Reader(io.IOBase):
         assert chunk_size >= 1
         if blob.size is None:
             blob.reload()
+        if blob.chunk_size is None:
+            # Induce google.cloud.storage.blob to use either google.resumable_media.requests.ChunkedDownload or
+            # google.resumable_media.requests.RawChunkedDownload, which do not attempt to perform data-integrity checks
+            # for chunk downloads (checksum headers are not available for chunks).
+            blob.chunk_size = ceil(chunk_size / _BLOB_CHUNK_SIZE_UNIT) * _BLOB_CHUNK_SIZE_UNIT
         self.blob = blob
         self.chunk_size = chunk_size
         self._buffer = bytearray()
