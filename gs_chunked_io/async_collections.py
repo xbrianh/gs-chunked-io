@@ -111,7 +111,7 @@ class AsyncQueue(_AsyncCollection):
         return len(self._to_be_submitted) + len(self._futures)
 
     def _submit_futures(self):
-        while len(self._running()) < self.concurrency:
+        while len(self._futures) < self.concurrency:
             try:
                 func, args, kwargs = self._to_be_submitted.pop(0)
             except IndexError:
