@@ -1,3 +1,6 @@
+# Changes for v0.4.2 (2020-08-01)
+Fix AsyncQueue bug (#55)
+
 # Changes for v0.4.1 (2020-07-31)
 Reader sets blob.chunk_size (#54)
 
