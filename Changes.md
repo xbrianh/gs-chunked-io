@@ -1,3 +1,7 @@
+# Changes for v0.4.3 (2020-08-04)
+Prevent race ahead in for_each_chunk_async (#57)
+Fix expected chunk size calculation (#56)
+
 # Changes for v0.4.2 (2020-08-01)
 Fix AsyncQueue bug (#55)
 
