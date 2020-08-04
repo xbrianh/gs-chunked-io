@@ -46,12 +46,14 @@ class Reader(io.IOBase):
         start_chunk = chunk_number * self.chunk_size
         end_chunk = start_chunk + self.chunk_size - 1
         if chunk_number == (self.number_of_chunks - 1):
-            expected_part_size = self.blob.size % self.chunk_size
+            expected_chunk_size = self.blob.size % self.chunk_size
+            if 0 == expected_chunk_size:
+                expected_chunk_size = self.chunk_size
         else:
-            expected_part_size = self.chunk_size
+            expected_chunk_size = self.chunk_size
         for _ in range(reader_retries):
             data = self.blob.download_as_string(start=start_chunk, end=end_chunk)
-            if expected_part_size == len(data):
+            if expected_chunk_size == len(data):
                 return data
         raise ValueError("Unexpected part size")
 
