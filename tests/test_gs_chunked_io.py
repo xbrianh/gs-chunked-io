@@ -6,6 +6,7 @@ import time
 import requests
 import warnings
 import unittest
+from math import ceil
 from uuid import uuid4
 from unittest import mock
 from concurrent.futures import ThreadPoolExecutor
@@ -181,13 +182,10 @@ class TestGSChunkedIOReader(unittest.TestCase):
     def setUp(self):
         _suppress_warnings()
 
-    def duration_subtests(self):
+    def duration_subtests(self, test_threads=[None, 3]):
         print()
-        subtests = [
-            ("sync", None),
-            ("async", 3),
-        ]
-        for subtest_name, threads in subtests:
+        for threads in test_threads:
+            subtest_name = f"threads={threads}"
             with self.subTest(subtest_name):
                 start_time = time.time()
                 yield subtest_name, threads 
@@ -239,6 +237,23 @@ class TestGSChunkedIOReader(unittest.TestCase):
             with gscio.Reader(self.blob, chunk_size=chunk_size, threads=threads) as fh:
                 bytes_read = fh.readinto(buff)
                 self.assertEqual(self.data, buff[:bytes_read])
+
+    def test_for_each_chunk(self):
+        chunk_size = len(self.data) // 10
+        for test_name, threads in self.duration_subtests():
+            data = bytes()
+            for chunk in gscio.for_each_chunk(self.blob, chunk_size=chunk_size, threads=threads):
+                data += chunk
+            self.assertEqual(data, self.data)
+
+    def test_for_each_chunk_async(self):
+        chunk_size = len(self.data) // 10
+        number_of_chunks = ceil(len(self.data) / chunk_size)
+        for test_name, threads in self.duration_subtests([1,2,3]):
+            chunks = [None] * number_of_chunks
+            for chunk_number, chunk in gscio.for_each_chunk_async(self.blob, chunk_size=chunk_size, threads=threads):
+                chunks[chunk_number] = chunk
+            self.assertEqual(self.data, b"".join(chunks))
 
     def test_fetch_chunk(self):
         blob = mock.MagicMock()

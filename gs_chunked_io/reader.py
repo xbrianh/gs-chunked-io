@@ -6,7 +6,7 @@ from typing import Optional
 from google.cloud.storage.blob import Blob
 
 from gs_chunked_io.config import default_chunk_size, reader_retries
-from gs_chunked_io.async_collections import AsyncQueue
+from gs_chunked_io.async_collections import AsyncSet, AsyncQueue
 
 
 _BLOB_CHUNK_SIZE_UNIT = 262144
@@ -130,5 +130,10 @@ def for_each_chunk_async(blob: Blob, chunk_size: int=default_chunk_size, threads
         return chunk_number, data
 
     with ThreadPoolExecutor(max_workers=threads) as e:
-        for chunk_number, chunk in e.map(fetch_chunk, range(reader.number_of_chunks)):
-            yield chunk_number, chunk
+        chunks = AsyncSet(e, threads)
+        for chunk_number in range(reader.number_of_chunks):
+            for chunk in chunks.consume_finished():
+                yield chunk
+            chunks.put(fetch_chunk, chunk_number)
+        for chunk in chunks.consume():
+            yield chunk
