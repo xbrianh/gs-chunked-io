@@ -30,17 +30,18 @@ class Writer(io.IOBase):
                  key: str,
                  bucket: google.cloud.storage.bucket.Bucket,
                  chunk_size: int=default_chunk_size,
+                 upload_id: Optional[str]=None,
                  part_callback: Optional[Callable[[int, str, bytes], None]]=None,
                  threads: Optional[int]=4):
         self.key = key
         self.bucket = bucket
         self.chunk_size = chunk_size
+        self.upload_id = upload_id or f"{uuid.uuid4()}"
         self._part_callback = part_callback
         self._part_names: List[str] = list()
         self._buffer = bytearray()
         self._current_part_number = 0
         self._closed = False
-        self._upload_id = f"{uuid.uuid4()}"
         if threads is not None:
             assert 1 <= threads
             max_workers = max(threads, 8)
@@ -138,7 +139,7 @@ class Writer(io.IOBase):
         return dst_part_name
 
     def _name_for_part_number(self, part_number: int) -> str:
-        return name_for_part(self._upload_id, part_number)
+        return name_for_part(self.upload_id, part_number)
 
     def _sorted_part_names(self, part_names: Iterable[str]) -> List[str]:
         """
@@ -195,9 +196,10 @@ class AsyncPartUploader:
     def __init__(self,
                  key: str,
                  bucket: google.cloud.storage.bucket.Bucket,
+                 upload_id: Optional[str]=None,
                  threads: int=4):
         assert 1 <= threads
-        self._writer = Writer(key, bucket, threads=threads)
+        self._writer = Writer(key, bucket, upload_id=upload_id, threads=threads)
         self.executor = ThreadPoolExecutor(max_workers=threads)
         self.future_chunk_uploads = AsyncSet(self.executor, concurrency=threads)
 
