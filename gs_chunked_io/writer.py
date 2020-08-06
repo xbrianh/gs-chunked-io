@@ -2,11 +2,11 @@ import io
 import uuid
 import requests
 from concurrent.futures import ThreadPoolExecutor
-from typing import List, Callable, Optional, Iterable
+from typing import List, Callable, Optional, Iterable, Generator
 
 import google.cloud.storage.bucket
 
-from gs_chunked_io.config import default_chunk_size, gs_max_parts_per_compose, writer_retries
+from gs_chunked_io.config import default_chunk_size, gs_max_parts_per_compose, writer_retries, upload_chunk_identifier
 from gs_chunked_io.async_collections import AsyncSet
 
 
@@ -40,7 +40,7 @@ class Writer(io.IOBase):
         self._buffer = bytearray()
         self._current_part_number = 0
         self._closed = False
-        self._upload_id = uuid.uuid4()
+        self._upload_id = f"{uuid.uuid4()}"
         if threads is not None:
             assert 1 <= threads
             max_workers = max(threads, 8)
@@ -137,15 +137,8 @@ class Writer(io.IOBase):
         self.bucket.blob(dst_part_name).compose(blobs)
         return dst_part_name
 
-    def _name_for_part_number(self, part_number) -> str:
-        """
-        Compose a Google Storage object name corresponding to `part_number`.
-        Since Google Storage shards based on object name, it is more optimal to use names that being with uniformly
-        distributed random strings, such as a uuid.
-        See: https://cloud.google.com/blog/products/gcp/optimizing-your-cloud-storage-performance-google-cloud-performance-atlas  # noqa
-        """
-        part_id = uuid.uuid4()
-        return f"{part_id}.{self._upload_id}.gs-chunked-io-part.%06i" % part_number
+    def _name_for_part_number(self, part_number: int) -> str:
+        return name_for_part(self._upload_id, part_number)
 
     def _sorted_part_names(self, part_names: Iterable[str]) -> List[str]:
         """
@@ -224,3 +217,20 @@ class AsyncPartUploader:
 
     def __exit__(self, *args, **kwargs):
         self.close()
+
+def name_for_part(upload_id: str, part_number: int) -> str:
+    """
+    Compose a Google Storage object name corresponding to `part_number`.
+    Since Google Storage shards based on object name, it is more optimal to use names that being with uniformly
+    distributed random strings, such as a uuid.
+    See: https://cloud.google.com/blog/products/gcp/optimizing-your-cloud-storage-performance-google-cloud-performance-atlas  # noqa
+    """
+    part_id = uuid.uuid4()
+    return f"{part_id}.{upload_id}.{upload_chunk_identifier}.%06i" % part_number
+
+def find_parts(bucket: google.cloud.storage.bucket.Bucket,
+               upload_id: Optional[str]=None) -> Generator[google.cloud.storage.blob.Blob, None, None]:
+    for blob in bucket.list_blobs():
+        if upload_chunk_identifier in blob.name:
+            if upload_id is None or upload_id in blob.name:
+                yield blob

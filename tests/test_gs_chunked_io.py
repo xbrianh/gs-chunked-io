@@ -17,7 +17,7 @@ pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))  # noq
 sys.path.insert(0, pkg_root)  # noqa
 
 import gs_chunked_io as gscio
-from gs_chunked_io.writer import _iter_groups, gs_max_parts_per_compose
+from gs_chunked_io.writer import _iter_groups, gs_max_parts_per_compose, name_for_part, find_parts
 from gs_chunked_io.config import default_chunk_size, reader_retries, writer_retries
 
 
@@ -177,6 +177,22 @@ class TestGSChunkedIOWriter(unittest.TestCase):
         with io.BytesIO() as fh:
             GS.bucket.get_blob(key).download_to_file(fh)
             self.assertEqual(b"".join(chunks), fh.getvalue())
+
+    def test_find_parts(self):
+        expected_names = {f"{uuid4()}": set() for _ in range(2)}
+        for upload_id in expected_names:
+            for i in range(2):
+                part_name = name_for_part(upload_id, i)
+                GS.bucket.blob(part_name).upload_from_file(io.BytesIO(os.urandom(5)))
+                expected_names[upload_id].add(part_name)
+        for upload_id in expected_names:
+            with self.subTest("find parts by upload id", upload_id=upload_id):
+                names = set([blob.name for blob in find_parts(GS.bucket, upload_id)])
+                self.assertEqual(expected_names[upload_id], names)
+        with self.subTest("find all parts"):
+            names = set([blob.name for blob in find_parts(GS.bucket)])
+            for name_set in expected_names.values():
+                assert name_set <= names
 
 class TestGSChunkedIOReader(unittest.TestCase):
     def setUp(self):
