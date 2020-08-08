@@ -10,7 +10,7 @@ from google.cloud.storage import Client
 
 client = Client()
 bucket = client.bucket("my-bucket")
-blob = bucket.get_blob("my-key)
+blob = bucket.get_blob("my-key")
 
 # Readable stream:
 with gscio.Reader(blob) as fh:
@@ -34,7 +34,7 @@ with gscio.Writer("my_dest_key", dst_bucket) as writer:
 # Extract .tar.gz on the fly:
 import gzip
 import tarfile
-with gscio.AsyncReader(blob) as fh:
+with gscio.Reader(blob) as fh:
     gzip_reader = gzip.GzipFile(fileobj=fh)
     tf = tarfile.TarFile(fileobj=gzip_reader)
     for tarinfo in tf:
