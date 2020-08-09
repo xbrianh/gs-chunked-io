@@ -134,6 +134,7 @@ def for_each_chunk_async(blob: Blob, chunk_size: int=default_chunk_size, threads
         for chunk_number in range(reader.number_of_chunks):
             for chunk in chunks.consume_finished():
                 yield chunk
+                break
             chunks.put(fetch_chunk, chunk_number)
         for chunk in chunks.consume():
             yield chunk
