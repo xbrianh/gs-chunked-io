@@ -1,7 +1,7 @@
 import io
 import uuid
 import requests
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Callable, Optional, Iterable, Generator
 
 import google.cloud.storage.bucket
@@ -236,3 +236,11 @@ def find_parts(bucket: google.cloud.storage.bucket.Bucket,
         if upload_chunk_identifier in blob.name:
             if upload_id is None or upload_id in blob.name:
                 yield blob
+
+def remove_parts(bucket: google.cloud.storage.bucket.Bucket, upload_id: Optional[str]=None):
+    blobs_to_delete = [blob for blob in find_parts(bucket)]
+    print(f"Deleting {len(blobs_to_delete)} parts")
+    with ThreadPoolExecutor(max_workers=8) as e:
+        futures = [e.submit(blob.delete) for blob in blobs_to_delete]
+        for f in as_completed(futures):
+            f.result()
