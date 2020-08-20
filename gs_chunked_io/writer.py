@@ -238,7 +238,7 @@ def find_parts(bucket: google.cloud.storage.bucket.Bucket,
                 yield blob
 
 def remove_parts(bucket: google.cloud.storage.bucket.Bucket, upload_id: Optional[str]=None):
-    blobs_to_delete = [blob for blob in find_parts(bucket)]
+    blobs_to_delete = [blob for blob in find_parts(bucket, upload_id)]
     print(f"Deleting {len(blobs_to_delete)} parts")
     with ThreadPoolExecutor(max_workers=8) as e:
         futures = [e.submit(blob.delete) for blob in blobs_to_delete]
