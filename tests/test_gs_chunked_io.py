@@ -183,7 +183,7 @@ class TestGSChunkedIOWriter(unittest.TestCase):
         for upload_id in expected_names:
             for i in range(2):
                 part_name = name_for_part(upload_id, i)
-                GS.bucket.blob(part_name).upload_from_file(io.BytesIO(os.urandom(5)))
+                GS.bucket.blob(part_name).upload_from_file(io.BytesIO(b""))
                 expected_names[upload_id].add(part_name)
         for upload_id in expected_names:
             with self.subTest("find parts by upload id", upload_id=upload_id):
