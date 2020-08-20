@@ -231,9 +231,9 @@ class TestGSChunkedIOReader(unittest.TestCase):
         with self.assertRaises(OSError):
             reader.fileno()
         with self.assertRaises(OSError):
-            reader.write(b"asdf")
+            reader.write(b"nonsense")
         with self.assertRaises(OSError):
-            reader.writelines(b"asdf")
+            reader.writelines(b"nonsense")
         with self.assertRaises(OSError):
             reader.seek(123)
         with self.assertRaises(NotImplementedError):
