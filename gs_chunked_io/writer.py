@@ -1,8 +1,9 @@
 import io
 import uuid
 import requests
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Callable, Optional, Iterable, Generator
+from typing import List, Tuple, Callable, Optional, Iterable, Generator
 
 import google.cloud.storage.bucket
 
@@ -236,6 +237,12 @@ def find_parts(bucket: google.cloud.storage.bucket.Bucket,
         if upload_chunk_identifier in blob.name:
             if upload_id is None or upload_id in blob.name:
                 yield blob
+
+def find_uploads(bucket: google.cloud.storage.bucket.Bucket) -> Generator[Tuple[str, datetime], None, None]:
+    for blob in find_parts(bucket):
+        part_id, upload_id, chunk_id, chunk_number = blob.name.split(".")
+        if 0 == int(chunk_number):
+            yield upload_id, blob.updated
 
 def remove_parts(bucket: google.cloud.storage.bucket.Bucket, upload_id: Optional[str]=None):
     blobs_to_delete = [blob for blob in find_parts(bucket, upload_id)]

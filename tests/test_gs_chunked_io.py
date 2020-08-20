@@ -17,7 +17,7 @@ pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))  # noq
 sys.path.insert(0, pkg_root)  # noqa
 
 import gs_chunked_io as gscio
-from gs_chunked_io.writer import _iter_groups, gs_max_parts_per_compose, name_for_part, find_parts
+from gs_chunked_io.writer import _iter_groups, gs_max_parts_per_compose, name_for_part, find_parts, find_uploads
 from gs_chunked_io.config import default_chunk_size, reader_retries, writer_retries
 
 
@@ -193,6 +193,15 @@ class TestGSChunkedIOWriter(unittest.TestCase):
             names = set([blob.name for blob in find_parts(GS.bucket)])
             for name_set in expected_names.values():
                 assert name_set <= names
+
+    def test_find_uploads(self):
+        expected_upload_ids = {f"{uuid4()}" for _ in range(2)}
+        for upload_id in expected_upload_ids:
+            for i in range(2):
+                GS.bucket.blob(name_for_part(upload_id, i)).upload_from_file(io.BytesIO(b""))
+        upload_ids = [uid for uid, _ in find_uploads(GS.bucket)]
+        self.assertEqual(len(upload_ids), len(set(upload_ids)))
+        self.assertLessEqual(expected_upload_ids, set(upload_ids))
 
 class TestGSChunkedIOReader(unittest.TestCase):
     def setUp(self):
