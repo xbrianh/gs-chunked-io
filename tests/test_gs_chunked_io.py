@@ -303,11 +303,11 @@ class TestGSChunkedIOReader(unittest.TestCase):
     def test_fetch_chunk(self):
         blob = mock.MagicMock()
         blob.size = 1.1 * default_chunk_size
-        blob.download_as_string = mock.MagicMock()
+        blob.download_as_bytes = mock.MagicMock()
         reader = gscio.Reader(blob, threads=None)
         with self.assertRaises(ValueError):
             reader._fetch_chunk(1)
-        self.assertEqual(reader_retries, blob.download_as_string.call_count)
+        self.assertEqual(reader_retries, blob.download_as_bytes.call_count)
 
     def test_chunked_read_write(self):
         key = f"test_chunked_read_write/obj"
