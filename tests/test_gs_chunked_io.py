@@ -120,10 +120,7 @@ class TestGSChunkedIOWriter(unittest.TestCase):
         for test_name, threads in self.duration_subtests():
             with gscio.Writer(key, bucket, chunk_size=chunk_size, threads=threads) as fh:
                 fh.write(data)
-            with io.BytesIO() as fh:
-                GS.bucket.get_blob(key).download_to_file(fh)
-                fh.seek(0)
-                self.assertEqual(data, fh.read())
+            self.assertEqual(data, GS.bucket.get_blob(key).download_as_bytes())
 
     def test_part_callback(self):
         chunk_size = 7
@@ -182,9 +179,7 @@ class TestGSChunkedIOWriter(unittest.TestCase):
         with gscio.AsyncPartUploader(key, GS.bucket, threads=4) as uploader:
             for i, chunk in enumerate(chunks):
                 uploader.put_part(i, chunk)
-        with io.BytesIO() as fh:
-            GS.bucket.get_blob(key).download_to_file(fh)
-            self.assertEqual(b"".join(chunks), fh.getvalue())
+        self.assertEqual(b"".join(chunks), GS.bucket.get_blob(key).download_as_bytes())
 
     def test_find_parts(self):
         expected_names = {f"{uuid4()}": set() for _ in range(2)}
