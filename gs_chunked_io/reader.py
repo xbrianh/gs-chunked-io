@@ -31,7 +31,7 @@ class Reader(io.IOBase):
         self.chunk_size = chunk_size
         self._buffer = bytearray()
         self._pos = 0
-        self.number_of_chunks = ceil(self.blob.size / self.chunk_size)
+        self.number_of_chunks = ceil(self.blob.size / self.chunk_size) if 0 < self.blob.size else 1
         self._unfetched_chunks = [i for i in range(self.number_of_chunks)]
         if threads is not None:
             assert 1 <= threads
@@ -47,8 +47,9 @@ class Reader(io.IOBase):
         end_chunk = start_chunk + self.chunk_size - 1
         if chunk_number == (self.number_of_chunks - 1):
             expected_chunk_size = self.blob.size % self.chunk_size
-            if 0 == expected_chunk_size:
-                expected_chunk_size = self.chunk_size
+            if 0 < self.blob.size:
+                if 0 == expected_chunk_size:
+                    expected_chunk_size = self.chunk_size
         else:
             expected_chunk_size = self.chunk_size
         for _ in range(reader_retries):

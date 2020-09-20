@@ -218,11 +218,13 @@ class TestGSChunkedIOReader(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.key = f"test_read/{uuid4()}"
-        cls.data = os.urandom(1024 * 7)
-        cls.blob = GS.bucket.blob(cls.key)
-        cls.blob.upload_from_file(io.BytesIO(cls.data))
-        cls.blob.reload()
+        cls.blob_tests = [
+            (GS.bucket.blob(f"test_read/{uuid4()}"), os.urandom(1024 * 7)),
+            (GS.bucket.blob(f"test_read/{uuid4()}"), b""),
+        ]
+        for blob, expected_data in cls.blob_tests:
+            blob.upload_from_file(io.BytesIO(expected_data))
+            blob.reload()
 
     def test_reader_interface(self):
         blob = mock.MagicMock()
@@ -249,36 +251,46 @@ class TestGSChunkedIOReader(unittest.TestCase):
         self.assertTrue(reader.closed)
 
     def test_read(self):
-        chunk_size = len(self.data) // 3
-        for test_name, threads in self.duration_subtests():
-            with gscio.Reader(self.blob, chunk_size=chunk_size, threads=threads) as fh:
-                self.assertEqual(4, fh.number_of_chunks)
-                self.assertEqual(self.data, fh.read())
+        for blob, expected_data in self.blob_tests:
+            if expected_data:
+                chunk_size = len(expected_data) // 3
+                expected_number_of_chunks = 4
+            else:
+                chunk_size = 1
+                expected_number_of_chunks = 1
+            for test_name, threads in self.duration_subtests():
+                with gscio.Reader(blob, chunk_size=chunk_size, threads=threads) as fh:
+                    self.assertEqual(expected_number_of_chunks, fh.number_of_chunks)
+                    self.assertEqual(expected_data, fh.read())
 
     def test_readinto(self):
-        chunk_size = len(self.data) // 3
-        buff = bytearray(2 * len(self.data))
-        for test_name, threads in self.duration_subtests():
-            with gscio.Reader(self.blob, chunk_size=chunk_size, threads=threads) as fh:
-                bytes_read = fh.readinto(buff)
-                self.assertEqual(self.data, buff[:bytes_read])
+        for blob, expected_data in self.blob_tests:
+            buff = bytearray(2 * len(expected_data) or 1)
+            chunk_size = len(expected_data) // 3 or 1
+            for test_name, threads in self.duration_subtests():
+                with gscio.Reader(blob, chunk_size=chunk_size, threads=threads) as fh:
+                    bytes_read = fh.readinto(buff)
+                    self.assertEqual(expected_data, buff[:bytes_read])
 
     def test_for_each_chunk(self):
-        chunk_size = len(self.data) // 10
-        for test_name, threads in self.duration_subtests():
-            data = bytes()
-            for chunk in gscio.for_each_chunk(self.blob, chunk_size=chunk_size, threads=threads):
-                data += chunk
-            self.assertEqual(data, self.data)
+        for blob, expected_data in self.blob_tests:
+            chunk_size = len(expected_data) // 3 or 1
+            for test_name, threads in self.duration_subtests():
+                chunks = list()
+                for chunk in gscio.for_each_chunk(blob, chunk_size=chunk_size, threads=threads):
+                    chunks.append(chunk)
+                self.assertLess(0, len(chunks))
+                self.assertEqual(expected_data, b"".join(chunks))
 
     def test_for_each_chunk_async(self):
-        chunk_size = len(self.data) // 10
-        number_of_chunks = ceil(len(self.data) / chunk_size)
-        for test_name, threads in self.duration_subtests([1,2,3]):
-            chunks = [None] * number_of_chunks
-            for chunk_number, chunk in gscio.for_each_chunk_async(self.blob, chunk_size=chunk_size, threads=threads):
-                chunks[chunk_number] = chunk
-            self.assertEqual(self.data, b"".join(chunks))
+        for blob, expected_data in self.blob_tests:
+            chunk_size = len(expected_data) // 10 or 1
+            number_of_chunks = ceil(len(expected_data) / chunk_size) or 1
+            for test_name, threads in self.duration_subtests([1,2,3]):
+                chunks = [None] * number_of_chunks
+                for chunk_number, chunk in gscio.for_each_chunk_async(blob, chunk_size=chunk_size, threads=threads):
+                    chunks[chunk_number] = chunk
+                self.assertEqual(expected_data, b"".join(chunks))
 
     def test_fetch_chunk(self):
         blob = mock.MagicMock()
