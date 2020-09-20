@@ -60,20 +60,17 @@ class Writer(io.IOBase):
         return self._closed
 
     def _put_part(self, part_number: int, data: bytes):
-        if data:
-            part_name = self._name_for_part_number(part_number)
-            for tries_remaining in range(writer_retries - 1, -1, -1):
-                try:
-                    self.bucket.blob(part_name).upload_from_file(io.BytesIO(data))
-                    break
-                except requests.exceptions.ConnectionError:
-                    if 0 == tries_remaining:
-                        raise
-            self._part_names.append(part_name)
-            if self._part_callback:
-                self._part_callback(part_number, part_name, data)
-        else:
-            raise ValueError(f"data for part_number={part_number} must not be empty!")
+        part_name = self._name_for_part_number(part_number)
+        for tries_remaining in range(writer_retries - 1, -1, -1):
+            try:
+                self.bucket.blob(part_name).upload_from_file(io.BytesIO(data))
+                break
+            except requests.exceptions.ConnectionError:
+                if 0 == tries_remaining:
+                    raise
+        self._part_names.append(part_name)
+        if self._part_callback:
+            self._part_callback(part_number, part_name, data)
 
     def writable(self) -> bool:
         return True
@@ -105,23 +102,26 @@ class Writer(io.IOBase):
     def _compose_dest_blob(self):
         self.wait()
         part_names = self._sorted_part_names(self._part_names)
-        part_numbers = [len(part_names)]
-        parts_to_delete = set(part_names)
-        while gs_max_parts_per_compose < len(part_names):
-            name_groups = [names for names in _iter_groups(part_names, group_size=gs_max_parts_per_compose)]
-            new_part_numbers = list(range(part_numbers[-1], part_numbers[-1] + len(name_groups)))
-            if self.executor:
-                part_names = self.executor.map(self._compose_parts,
-                                               name_groups,
-                                               [self._name_for_part_number(n) for n in new_part_numbers])
-                part_names = self._sorted_part_names(part_names)
-            else:
-                part_names = [self._compose_parts(names, self._name_for_part_number(new_part_number))
-                              for names, new_part_number in zip(name_groups, new_part_numbers)]
-            parts_to_delete.update(part_names)
-            part_numbers = new_part_numbers
-        self._compose_parts(part_names, self.key)
-        self._delete_parts(parts_to_delete)
+        if 0 < len(part_names):
+            part_numbers = [len(part_names)]
+            parts_to_delete = set(part_names)
+            while gs_max_parts_per_compose < len(part_names):
+                name_groups = [names for names in _iter_groups(part_names, group_size=gs_max_parts_per_compose)]
+                new_part_numbers = list(range(part_numbers[-1], part_numbers[-1] + len(name_groups)))
+                if self.executor:
+                    part_names = self.executor.map(self._compose_parts,
+                                                   name_groups,
+                                                   [self._name_for_part_number(n) for n in new_part_numbers])
+                    part_names = self._sorted_part_names(part_names)
+                else:
+                    part_names = [self._compose_parts(names, self._name_for_part_number(new_part_number))
+                                  for names, new_part_number in zip(name_groups, new_part_numbers)]
+                parts_to_delete.update(part_names)
+                part_numbers = new_part_numbers
+            self._compose_parts(part_names, self.key)
+            self._delete_parts(parts_to_delete)
+        else:
+            self.bucket.blob(self.key).upload_from_file(io.BytesIO(b""))
 
     def _delete_parts(self, part_names):
         def _del(name):

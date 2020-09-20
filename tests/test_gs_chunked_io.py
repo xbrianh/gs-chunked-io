@@ -10,6 +10,7 @@ from math import ceil
 from uuid import uuid4
 from unittest import mock
 from concurrent.futures import ThreadPoolExecutor
+from typing import List
 
 from google.cloud.storage import Client
 
@@ -106,6 +107,8 @@ class TestGSChunkedIOWriter(unittest.TestCase):
         data = os.urandom(120 * 1024)
         with self.subTest("Test greater than gs_max_parts_per_compose parts"):
             self._test_write_object(data, len(data) // (1 + gs_max_parts_per_compose))
+        with self.subTest("Test zero byte object"):
+            self._test_write_object(b"", 1024)
         with self.subTest("Shouldn't be able to pass in a string for bucket"):
             with self.assertRaises(TypeError):
                 with gscio.Writer("some key", "not a bucket") as fh:
@@ -169,7 +172,12 @@ class TestGSChunkedIOWriter(unittest.TestCase):
             self.assertEqual(writer_retries, bucket.blob.call_count)
 
     def test_async_part_uploader(self):
-        chunks = [os.urandom(10) for _ in range(7)]
+        with self.subTest("normal parts"):
+            self._test_async_part_uploader([os.urandom(10) for _ in range(7)])
+        with self.subTest("zero byte object"):
+            self._test_async_part_uploader([b""])
+
+    def _test_async_part_uploader(self, chunks: List[bytes]):
         key = f"test_write/{uuid4()}"
         with gscio.AsyncPartUploader(key, GS.bucket, threads=4) as uploader:
             for i, chunk in enumerate(chunks):
