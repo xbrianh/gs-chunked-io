@@ -1,3 +1,6 @@
+# Changes for v0.4.5 (2020-09-22)
+Suppress checksumming for chunked downloads (#74)
+
 # Changes for v0.4.4 (2020-09-20)
 Minor test simplifications (#73)
 Bump google-cloud-storage (#72)
