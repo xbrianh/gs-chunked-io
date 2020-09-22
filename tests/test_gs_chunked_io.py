@@ -20,6 +20,7 @@ sys.path.insert(0, pkg_root)  # noqa
 import gs_chunked_io as gscio
 from gs_chunked_io.writer import _iter_groups, gs_max_parts_per_compose, name_for_part, find_parts, find_uploads
 from gs_chunked_io.config import default_chunk_size, reader_retries, writer_retries
+from gs_chunked_io.async_collections import AsyncSet, AsyncQueue
 
 
 class GS:
@@ -47,6 +48,10 @@ def tearDownModule():
 class TestGSChunkedIOWriter(unittest.TestCase):
     def setUp(self):
         _suppress_warnings()
+        self.executor = ThreadPoolExecutor(max_workers=8)
+
+    def tearDown(self):
+        self.executor.shutdown()
 
     def duration_subtests(self):
         print()
@@ -56,9 +61,13 @@ class TestGSChunkedIOWriter(unittest.TestCase):
         ]
         for subtest_name, threads in subtests:
             with self.subTest(subtest_name):
+                if threads is not None:
+                    async_set = AsyncSet(self.executor, threads)
+                else:
+                    async_set = None
                 start_time = time.time()
                 try:
-                    yield subtest_name, threads
+                    yield subtest_name, threads, async_set
                 except GeneratorExit:
                     return
                 print(self.id(), "duration", subtest_name, time.time() - start_time)
@@ -117,8 +126,8 @@ class TestGSChunkedIOWriter(unittest.TestCase):
     def _test_write_object(self, data: bytes, chunk_size: int, bucket=None):
         bucket = bucket or GS.bucket
         key = f"test_write/{uuid4()}"
-        for test_name, threads in self.duration_subtests():
-            with gscio.Writer(key, bucket, chunk_size=chunk_size, threads=threads) as fh:
+        for test_name, threads, async_set in self.duration_subtests():
+            with gscio.Writer(key, bucket, chunk_size=chunk_size, async_set=async_set) as fh:
                 fh.write(data)
             self.assertEqual(data, GS.bucket.get_blob(key).download_as_bytes())
 
@@ -131,19 +140,19 @@ class TestGSChunkedIOWriter(unittest.TestCase):
             self.assertEqual(chunk_data, data[part_number * chunk_size : (1 + part_number) * chunk_size])
             parts_called.append(part_number)
 
-        for test_name, threads in self.duration_subtests():
+        for test_name, threads, async_set in self.duration_subtests():
             parts_called = list()
             key = f"test_write/{uuid4()}"
-            with gscio.Writer(key, GS.bucket, chunk_size=chunk_size, part_callback=cb, threads=threads) as fh:
+            with gscio.Writer(key, GS.bucket, chunk_size=chunk_size, part_callback=cb, async_set=async_set) as fh:
                 fh.write(data)
             self.assertEqual(number_of_parts, len(parts_called))
 
     def test_abort(self):
         data = os.urandom(7 * 1024)
         chunk_size = len(data) // 3
-        for test_name, threads in self.duration_subtests():
+        for test_name, threads, async_set in self.duration_subtests():
             key = f"test_write/{uuid4()}"
-            with gscio.Writer(key, GS.bucket, chunk_size=chunk_size, threads=threads) as fh:
+            with gscio.Writer(key, GS.bucket, chunk_size=chunk_size, async_set=async_set) as fh:
                 fh.write(data[:chunk_size])
                 fh.wait()
                 self.assertEqual(1, len(fh._part_names))
@@ -176,7 +185,8 @@ class TestGSChunkedIOWriter(unittest.TestCase):
 
     def _test_async_part_uploader(self, chunks: List[bytes]):
         key = f"test_write/{uuid4()}"
-        with gscio.AsyncPartUploader(key, GS.bucket, threads=4) as uploader:
+        async_set = AsyncSet(self.executor, 4)
+        with gscio.AsyncPartUploader(key, GS.bucket, async_set) as uploader:
             for i, chunk in enumerate(chunks):
                 uploader.put_part(i, chunk)
         self.assertEqual(b"".join(chunks), GS.bucket.get_blob(key).download_as_bytes())
@@ -209,14 +219,24 @@ class TestGSChunkedIOWriter(unittest.TestCase):
 class TestGSChunkedIOReader(unittest.TestCase):
     def setUp(self):
         _suppress_warnings()
+        self.executor = ThreadPoolExecutor(max_workers=8)
+
+    def tearDown(self):
+        self.executor.shutdown()
 
     def duration_subtests(self, test_threads=[None, 3]):
         print()
         for threads in test_threads:
             subtest_name = f"threads={threads}"
             with self.subTest(subtest_name):
+                if threads is not None:
+                    async_queue = AsyncQueue(self.executor, threads)
+                    async_set = AsyncSet(self.executor, threads)
+                else:
+                    async_queue = None
+                    async_set = None
                 start_time = time.time()
-                yield subtest_name, threads 
+                yield subtest_name, threads, async_queue, async_set
                 print(self.id(), "duration", subtest_name, time.time() - start_time)
 
     @classmethod
@@ -261,8 +281,8 @@ class TestGSChunkedIOReader(unittest.TestCase):
             else:
                 chunk_size = 1
                 expected_number_of_chunks = 1
-            for test_name, threads in self.duration_subtests():
-                with gscio.Reader(blob, chunk_size=chunk_size, threads=threads) as fh:
+            for test_name, threads, async_queue, async_set in self.duration_subtests():
+                with gscio.Reader(blob, chunk_size=chunk_size, async_queue=async_queue) as fh:
                     self.assertEqual(expected_number_of_chunks, fh.number_of_chunks)
                     self.assertEqual(expected_data, fh.read())
 
@@ -270,17 +290,17 @@ class TestGSChunkedIOReader(unittest.TestCase):
         for blob, expected_data in self.blob_tests:
             buff = bytearray(2 * len(expected_data) or 1)
             chunk_size = len(expected_data) // 3 or 1
-            for test_name, threads in self.duration_subtests():
-                with gscio.Reader(blob, chunk_size=chunk_size, threads=threads) as fh:
+            for test_name, threads, async_queue, async_set in self.duration_subtests():
+                with gscio.Reader(blob, chunk_size=chunk_size, async_queue=async_queue) as fh:
                     bytes_read = fh.readinto(buff)
                     self.assertEqual(expected_data, buff[:bytes_read])
 
     def test_for_each_chunk(self):
         for blob, expected_data in self.blob_tests:
             chunk_size = len(expected_data) // 3 or 1
-            for test_name, threads in self.duration_subtests():
+            for test_name, threads, async_queue, async_set in self.duration_subtests():
                 chunks = list()
-                for chunk in gscio.for_each_chunk(blob, chunk_size=chunk_size, threads=threads):
+                for chunk in gscio.for_each_chunk(blob, chunk_size=chunk_size, async_queue=async_queue):
                     chunks.append(chunk)
                 self.assertLess(0, len(chunks))
                 self.assertEqual(expected_data, b"".join(chunks))
@@ -289,9 +309,9 @@ class TestGSChunkedIOReader(unittest.TestCase):
         for blob, expected_data in self.blob_tests:
             chunk_size = len(expected_data) // 10 or 1
             number_of_chunks = ceil(len(expected_data) / chunk_size) or 1
-            for test_name, threads in self.duration_subtests([1,2,3]):
+            for test_name, threads, async_queue, async_set in self.duration_subtests(test_threads=[1,3]):
                 chunks = [None] * number_of_chunks
-                for chunk_number, chunk in gscio.for_each_chunk_async(blob, chunk_size=chunk_size, threads=threads):
+                for chunk_number, chunk in gscio.for_each_chunk_async(blob, async_set, chunk_size=chunk_size):
                     chunks[chunk_number] = chunk
                 self.assertEqual(expected_data, b"".join(chunks))
 
@@ -299,7 +319,7 @@ class TestGSChunkedIOReader(unittest.TestCase):
         blob = mock.MagicMock()
         blob.size = 1.1 * default_chunk_size
         blob.download_as_bytes = mock.MagicMock()
-        reader = gscio.Reader(blob, threads=None)
+        reader = gscio.Reader(blob)
         with self.assertRaises(ValueError):
             reader._fetch_chunk(1)
         self.assertEqual(reader_retries, blob.download_as_bytes.call_count)
@@ -312,7 +332,8 @@ class TestGSChunkedIOReader(unittest.TestCase):
         blob.upload_from_file(io.BytesIO(expected_data))
         blob.reload()
         chunks = list()
-        for i, chunk in gscio.for_each_chunk_async(blob, chunk_size=chunk_size, threads=2):
+        async_set = AsyncSet(self.executor, 2)
+        for i, chunk in gscio.for_each_chunk_async(blob, async_set, chunk_size=chunk_size):
             chunks.append((i, chunk))
         data = b""
         for _, chunk in sorted(chunks):

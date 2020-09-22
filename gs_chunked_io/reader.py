@@ -1,6 +1,5 @@
 import io
 from math import ceil
-from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 from google.cloud.storage.blob import Blob
@@ -14,11 +13,11 @@ _BLOB_CHUNK_SIZE_UNIT = 262144
 class Reader(io.IOBase):
     """
     Readable stream on top of GS blob. Bytes are fetched in chunks of `chunk_size`.
-    Chunks are downloaded with concurrency equal to `threads`.
+    Chunks are downloaded with concurrency as configured in `async_set`.
 
-    Concurrency can be disabled by passing in`threads=None`.
+    Concurrency can be disabled by passing in`async_queue=None`.
     """
-    def __init__(self, blob: Blob, chunk_size: int=default_chunk_size, threads: Optional[int]=2):
+    def __init__(self, blob: Blob, chunk_size: int=default_chunk_size, async_queue: Optional[AsyncQueue]=None):
         assert chunk_size >= 1
         if blob.size is None:
             blob.reload()
@@ -33,14 +32,13 @@ class Reader(io.IOBase):
         self._pos = 0
         self.number_of_chunks = ceil(self.blob.size / self.chunk_size) if 0 < self.blob.size else 1
         self._unfetched_chunks = [i for i in range(self.number_of_chunks)]
-        if threads is not None:
-            assert 1 <= threads
-            self.executor: Optional[ThreadPoolExecutor] = ThreadPoolExecutor(max_workers=threads)
-            self.future_chunk_downloads = AsyncQueue(self.executor, threads)
+        self.future_chunk_downloads: Optional[AsyncQueue]
+        if async_queue is not None:
+            self.future_chunk_downloads = async_queue
             for chunk_number in self._unfetched_chunks:
                 self.future_chunk_downloads.put(self._fetch_chunk, chunk_number)
         else:
-            self.executor = None
+            self.future_chunk_downloads = None
 
     def _fetch_chunk(self, chunk_number: int) -> bytes:
         start_chunk = chunk_number * self.chunk_size
@@ -66,7 +64,7 @@ class Reader(io.IOBase):
             size = self.blob.size
         if size + self._pos > len(self._buffer):
             del self._buffer[:self._pos]
-            if self.executor:
+            if self.future_chunk_downloads is not None:
                 while size > len(self._buffer) and len(self.future_chunk_downloads):
                     self._buffer += self.future_chunk_downloads.get()
             else:
@@ -97,45 +95,39 @@ class Reader(io.IOBase):
         raise OSError()
 
     def close(self):
-        if self.executor:
-            self.executor.shutdown()
         super().close()
 
-def for_each_chunk(blob: Blob, chunk_size: int=default_chunk_size, threads: Optional[int]=2):
+def for_each_chunk(blob: Blob, chunk_size: int=default_chunk_size, async_queue: Optional[AsyncQueue]=None):
     """
-    Fetch chunks and yield in order. Chunks are downloaded with concurrency equal to `threads`
+    Fetch chunks and yield in order. Chunks are downloaded with concurrency as configured in `async_queue`
     """
     reader = Reader(blob, chunk_size=chunk_size)
-    if threads is not None:
-        assert 1 <= threads
-        with ThreadPoolExecutor(max_workers=threads) as e:
-            future_chunk_downloads = AsyncQueue(e, concurrency=threads)
-            for chunk_number in reader._unfetched_chunks:
-                future_chunk_downloads.put(reader._fetch_chunk, chunk_number)
-            for chunk in future_chunk_downloads.consume():
-                yield chunk
+    if async_queue is not None:
+        for chunk_number in reader._unfetched_chunks:
+            async_queue.put(reader._fetch_chunk, chunk_number)
+        for chunk in async_queue.consume():
+            yield chunk
     else:
         for chunk_number in reader._unfetched_chunks:
             yield reader._fetch_chunk(chunk_number)
 
-def for_each_chunk_async(blob: Blob, chunk_size: int=default_chunk_size, threads: int=4):
+def for_each_chunk_async(blob: Blob, async_set: AsyncSet, chunk_size: int=default_chunk_size):
     """
-    Fetch chunks with concurrency equal to `threads`, yielding results as soon as available.
+    Fetch chunks with concurrency as configured in `async_set`, yielding results as soon as available.
     Results may be returned in any order.
     """
-    assert 1 <= threads
     reader = Reader(blob, chunk_size)
 
     def fetch_chunk(chunk_number):
         data = reader._fetch_chunk(chunk_number)
         return chunk_number, data
 
-    with ThreadPoolExecutor(max_workers=threads) as e:
-        chunks = AsyncSet(e, threads)
-        for chunk_number in range(reader.number_of_chunks):
-            for chunk in chunks.consume_finished():
-                yield chunk
-                break
-            chunks.put(fetch_chunk, chunk_number)
-        for chunk in chunks.consume():
-            yield chunk
+    for chunk_number in range(reader.number_of_chunks):
+        for cn, d in async_set.consume_finished():
+            yield cn, d
+            # Breaking after the first yield allows us to add more downloads to the pot without
+            # waiting for the client to complete potentially time-consuming operations.
+            break
+        async_set.put(fetch_chunk, chunk_number)
+    for cn, d in async_set.consume():
+        yield cn, d

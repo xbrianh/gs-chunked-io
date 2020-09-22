@@ -22,10 +22,10 @@ class Writer(io.IOBase):
     if `part_callback` is provided, will be called for each part with part number, part blob key, and part data as
     arguments.
 
-    Chunks are uploaded with concurrency equal to `threads`. If the maximum number of uploads is currently in progress,
-    `write` blocks until an upload slot becomes available.
+    Chunks are uploaded with concurrency as configured in `async_set`. If the maximum number of uploads is currently in
+    progress, `write` blocks until an upload slot becomes available.
 
-    Concurrency can be disabled by passing in`threads=None`.
+    Concurrency can be disabled by passing in `async_set=None`.
     """
     def __init__(self,
                  key: str,
@@ -33,7 +33,7 @@ class Writer(io.IOBase):
                  chunk_size: int=default_chunk_size,
                  upload_id: Optional[str]=None,
                  part_callback: Optional[Callable[[int, str, bytes], None]]=None,
-                 threads: Optional[int]=4):
+                 async_set: Optional[AsyncSet]=None):
         self.key = key
         self.bucket = bucket
         self.chunk_size = chunk_size
@@ -43,13 +43,7 @@ class Writer(io.IOBase):
         self._buffer = bytearray()
         self._current_part_number = 0
         self._closed = False
-        if threads is not None:
-            assert 1 <= threads
-            max_workers = max(threads, 8)
-            self.executor: Optional[ThreadPoolExecutor] = ThreadPoolExecutor(max_workers=max_workers)
-            self.future_chunk_uploads = AsyncSet(self.executor, concurrency=threads)
-        else:
-            self.executor = None
+        self.future_chunk_uploads: Optional[AsyncSet] = async_set
         try:
             bucket.blob
         except AttributeError:
@@ -78,7 +72,7 @@ class Writer(io.IOBase):
     def write(self, data: bytes):
         self._buffer += data
         while len(self._buffer) >= self.chunk_size:
-            if self.executor:
+            if self.future_chunk_uploads is not None:
                 for _ in self.future_chunk_uploads.consume_finished():
                     pass
                 self.future_chunk_uploads.put(self._put_part, self._current_part_number, self._buffer[:self.chunk_size])
@@ -96,8 +90,6 @@ class Writer(io.IOBase):
             if self._buffer:
                 self._put_part(self._current_part_number, self._buffer)
             self._compose_dest_blob()
-            if self.executor:
-                self.executor.shutdown()
 
     def _compose_dest_blob(self):
         self.wait()
@@ -108,14 +100,11 @@ class Writer(io.IOBase):
             while gs_max_parts_per_compose < len(part_names):
                 name_groups = [names for names in _iter_groups(part_names, group_size=gs_max_parts_per_compose)]
                 new_part_numbers = list(range(part_numbers[-1], part_numbers[-1] + len(name_groups)))
-                if self.executor:
-                    part_names = self.executor.map(self._compose_parts,
-                                                   name_groups,
-                                                   [self._name_for_part_number(n) for n in new_part_numbers])
+                with ThreadPoolExecutor(max_workers=8) as executor:
+                    part_names = executor.map(self._compose_parts,
+                                              name_groups,
+                                              [self._name_for_part_number(n) for n in new_part_numbers])
                     part_names = self._sorted_part_names(part_names)
-                else:
-                    part_names = [self._compose_parts(names, self._name_for_part_number(new_part_number))
-                                  for names, new_part_number in zip(name_groups, new_part_numbers)]
                 parts_to_delete.update(part_names)
                 part_numbers = new_part_numbers
             self._compose_parts(part_names, self.key)
@@ -127,12 +116,9 @@ class Writer(io.IOBase):
         def _del(name):
             self.bucket.blob(name).delete()
 
-        if self.executor:
-            for _ in self.executor.map(_del, part_names):
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            for _ in executor.map(_del, part_names):
                 pass
-        else:
-            for name in part_names:
-                _del(name)
 
     def _compose_parts(self, part_names, dst_part_name) -> str:
         blobs = [self.bucket.blob(name) for name in part_names]
@@ -154,7 +140,7 @@ class Writer(io.IOBase):
         Wait for all concurrent uploads to finish.
         If `executor` is None, this method does nothing.
         """
-        if self.executor:
+        if self.future_chunk_uploads is not None:
             for _ in self.future_chunk_uploads.consume():
                 pass
 
@@ -164,7 +150,7 @@ class Writer(io.IOBase):
         """
         if not self._closed:
             self._closed = True
-            if self.executor:
+            if self.future_chunk_uploads is not None:
                 self.future_chunk_uploads.abort()
             self._delete_parts(self._part_names)
 
@@ -190,19 +176,16 @@ def _iter_groups(lst: list, group_size=32):
 
 class AsyncPartUploader:
     """
-    Concurrently put parts in any order. `put_part` blocks when concurrent uploads equals or exceeds
-    `concurrent_uploads`. The executor should have equal or more threads than `concurrent_uploads`.
+    Concurrently put parts in any order.
     """
 
     def __init__(self,
                  key: str,
                  bucket: google.cloud.storage.bucket.Bucket,
-                 upload_id: Optional[str]=None,
-                 threads: int=4):
-        assert 1 <= threads
-        self._writer = Writer(key, bucket, upload_id=upload_id, threads=threads)
-        self.executor = ThreadPoolExecutor(max_workers=threads)
-        self.future_chunk_uploads = AsyncSet(self.executor, concurrency=threads)
+                 async_set: AsyncSet,
+                 upload_id: Optional[str]=None):
+        self.future_chunk_uploads = async_set
+        self._writer = Writer(key, bucket, upload_id=upload_id)
 
     def put_part(self, part_number: int, data: bytes):
         for _ in self.future_chunk_uploads.consume_finished():
@@ -213,7 +196,6 @@ class AsyncPartUploader:
         for _ in self.future_chunk_uploads.consume():
             pass
         self._writer.close()
-        self.executor.shutdown()
 
     def __enter__(self):
         return self
