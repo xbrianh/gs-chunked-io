@@ -1,3 +1,6 @@
+# Changes for v0.5.0 (2020-09-22)
+Explicit async collections instead of "threads" (#75)
+
 # Changes for v0.4.5 (2020-09-22)
 Suppress checksumming for chunked downloads (#74)
 
