@@ -1,4 +1,5 @@
 import io
+import time
 import uuid
 import requests
 from datetime import datetime
@@ -6,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Tuple, Callable, Optional, Iterable, Generator
 
 import google.cloud.storage.bucket
+from google.api_core.exceptions import ServiceUnavailable
 
 from gs_chunked_io.config import default_chunk_size, gs_max_parts_per_compose, writer_retries, upload_chunk_identifier
 from gs_chunked_io.async_collections import AsyncSet
@@ -227,9 +229,17 @@ def find_uploads(bucket: google.cloud.storage.bucket.Bucket) -> Generator[Tuple[
             yield upload_id, blob.updated
 
 def remove_parts(bucket: google.cloud.storage.bucket.Bucket, upload_id: Optional[str]=None):
+    def _delete_blob(blob: google.cloud.storage.Blob):
+        for tries_remaining in range(writer_retries - 1, -1, -1):
+            try:
+                blob.delete()
+            except ServiceUnavailable:
+                pass
+            time.sleep(0.5)
+
     blobs_to_delete = [blob for blob in find_parts(bucket, upload_id)]
     print(f"Deleting {len(blobs_to_delete)} parts")
     with ThreadPoolExecutor(max_workers=8) as e:
-        futures = [e.submit(blob.delete) for blob in blobs_to_delete]
+        futures = [e.submit(_delete_blob, blob) for blob in blobs_to_delete]
         for f in as_completed(futures):
             f.result()
