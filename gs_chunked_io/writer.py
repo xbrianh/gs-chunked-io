@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Tuple, Callable, Optional, Iterable, Generator
 
 import google.cloud.storage.bucket
-from google.api_core.exceptions import ServiceUnavailable
+from google.api_core.exceptions import ServiceUnavailable, NotFound
 
 from gs_chunked_io.config import default_chunk_size, gs_max_parts_per_compose, writer_retries, upload_chunk_identifier
 from gs_chunked_io.async_collections import AsyncSet
@@ -238,5 +238,7 @@ def _delete_blob(blob: google.cloud.storage.Blob):
     for tries_remaining in range(writer_retries - 1, -1, -1):
         try:
             blob.delete()
+        except NotFound:
+            break
         except ServiceUnavailable:
             time.sleep(0.5)
