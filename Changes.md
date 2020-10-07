@@ -1,3 +1,9 @@
+# Changes for v0.5.1 (2020-10-07)
+Catch NotFound for blob deletes (#78)
+Catch blob delete errors in Writer (#79)
+Add retries for delete parts (#77)
+Update requirements (#76)
+
 # Changes for v0.5.0 (2020-09-22)
 Explicit async collections instead of "threads" (#75)
 
