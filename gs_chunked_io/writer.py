@@ -115,11 +115,9 @@ class Writer(io.IOBase):
             self.bucket.blob(self.key).upload_from_file(io.BytesIO(b""))
 
     def _delete_parts(self, part_names):
-        def _del(name):
-            self.bucket.blob(name).delete()
-
+        blobs = [self.bucket.blob(n) for n in part_names]
         with ThreadPoolExecutor(max_workers=8) as executor:
-            for _ in executor.map(_del, part_names):
+            for _ in executor.map(_delete_blob, blobs):
                 pass
 
     def _compose_parts(self, part_names, dst_part_name) -> str:
@@ -229,17 +227,16 @@ def find_uploads(bucket: google.cloud.storage.bucket.Bucket) -> Generator[Tuple[
             yield upload_id, blob.updated
 
 def remove_parts(bucket: google.cloud.storage.bucket.Bucket, upload_id: Optional[str]=None):
-    def _delete_blob(blob: google.cloud.storage.Blob):
-        for tries_remaining in range(writer_retries - 1, -1, -1):
-            try:
-                blob.delete()
-            except ServiceUnavailable:
-                pass
-            time.sleep(0.5)
-
     blobs_to_delete = [blob for blob in find_parts(bucket, upload_id)]
     print(f"Deleting {len(blobs_to_delete)} parts")
     with ThreadPoolExecutor(max_workers=8) as e:
         futures = [e.submit(_delete_blob, blob) for blob in blobs_to_delete]
         for f in as_completed(futures):
             f.result()
+
+def _delete_blob(blob: google.cloud.storage.Blob):
+    for tries_remaining in range(writer_retries - 1, -1, -1):
+        try:
+            blob.delete()
+        except ServiceUnavailable:
+            time.sleep(0.5)
