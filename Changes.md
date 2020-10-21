@@ -1,3 +1,6 @@
+# Changes for v0.5.2 (2020-10-21)
+Improve writer retry logic, retry compose blobs (#80)
+
 # Changes for v0.5.1 (2020-10-07)
 Catch NotFound for blob deletes (#78)
 Catch blob delete errors in Writer (#79)
