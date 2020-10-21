@@ -13,12 +13,14 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import List
 
 from google.cloud.storage import Client
+from google.api_core.exceptions import ServiceUnavailable
 
 pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))  # noqa
 sys.path.insert(0, pkg_root)  # noqa
 
 import gs_chunked_io as gscio
-from gs_chunked_io.writer import _iter_groups, gs_max_parts_per_compose, name_for_part, find_parts, find_uploads
+from gs_chunked_io.writer import (_iter_groups, gs_max_parts_per_compose, name_for_part, find_parts, find_uploads,
+                                  retry_network_errors)
 from gs_chunked_io.config import default_chunk_size, reader_retries, writer_retries
 from gs_chunked_io.async_collections import AsyncSet, AsyncQueue
 
@@ -52,6 +54,22 @@ class TestGSChunkedIOWriter(unittest.TestCase):
 
     def tearDown(self):
         self.executor.shutdown()
+
+    def test_retry_network_errors(self):
+        tests = [(ServiceUnavailable, writer_retries),
+                 (requests.exceptions.ConnectionError, writer_retries),
+                 (Exception, 1)]
+        for exc, expected_tries in tests:
+            count = dict(count=0)
+
+            @retry_network_errors
+            def my_func():
+                count['count'] += 1
+                raise exc("SDF")
+
+            with self.assertRaises(exc):
+                my_func()
+            self.assertEqual(count['count'], expected_tries)
 
     def duration_subtests(self):
         print()

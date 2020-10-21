@@ -2,6 +2,7 @@ import io
 import time
 import uuid
 import requests
+from functools import wraps
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Tuple, Callable, Optional, Iterable, Generator
@@ -12,6 +13,19 @@ from google.api_core.exceptions import ServiceUnavailable, NotFound
 from gs_chunked_io.config import default_chunk_size, gs_max_parts_per_compose, writer_retries, upload_chunk_identifier
 from gs_chunked_io.async_collections import AsyncSet
 
+
+def retry_network_errors(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        for tries_remaining in range(writer_retries - 1, -1, -1):
+            try:
+                return func(*args, **kwargs)
+            except (requests.exceptions.ConnectionError, ServiceUnavailable):
+                if 0 == tries_remaining:
+                    raise
+                else:
+                    time.sleep(0.5)
+    return wrapper
 
 class Writer(io.IOBase):
     """
@@ -55,15 +69,10 @@ class Writer(io.IOBase):
     def closed(self) -> bool:
         return self._closed
 
+    @retry_network_errors
     def _put_part(self, part_number: int, data: bytes):
         part_name = self._name_for_part_number(part_number)
-        for tries_remaining in range(writer_retries - 1, -1, -1):
-            try:
-                self.bucket.blob(part_name).upload_from_file(io.BytesIO(data))
-                break
-            except requests.exceptions.ConnectionError:
-                if 0 == tries_remaining:
-                    raise
+        self.bucket.blob(part_name).upload_from_file(io.BytesIO(data))
         self._part_names.append(part_name)
         if self._part_callback:
             self._part_callback(part_number, part_name, data)
@@ -120,6 +129,7 @@ class Writer(io.IOBase):
             for _ in executor.map(_delete_blob, blobs):
                 pass
 
+    @retry_network_errors
     def _compose_parts(self, part_names, dst_part_name) -> str:
         blobs = [self.bucket.blob(name) for name in part_names]
         self.bucket.blob(dst_part_name).compose(blobs)
@@ -234,11 +244,9 @@ def remove_parts(bucket: google.cloud.storage.bucket.Bucket, upload_id: Optional
         for f in as_completed(futures):
             f.result()
 
+@retry_network_errors
 def _delete_blob(blob: google.cloud.storage.Blob):
-    for tries_remaining in range(writer_retries - 1, -1, -1):
-        try:
-            blob.delete()
-        except NotFound:
-            break
-        except ServiceUnavailable:
-            time.sleep(0.5)
+    try:
+        blob.delete()
+    except NotFound:
+        pass
